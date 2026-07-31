@@ -1,0 +1,52 @@
+# Agent-local collaboration files
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+/.agents/
+/.codex/
+/.claude/
+/.gemini/
+
+# Local planning and evidence
+/docs/TODO.md
+/docs/WBS.md
+/docs/tickets/
+/docs/refs/
+/docs/deps/
+
+# Generated EPUBs and reports
+/epub/
+/output/
+/outputs/
+/dist/
+/tmp/
+*.epub
+*.epub.tmp
+build-manifest.json
+source-audit.json
+epub-audit.json
+epubcheck.json
+content-audit.json
+manifest.json
+validation.json
+*.log
+
+# Rust
+/target/
+
+# Python
+__pycache__/
+*.py[cod]
+/.venv/
+/venv/
+
+# Editors and operating systems
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+.env.*
+!.env.example

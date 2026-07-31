@@ -1,0 +1,3 @@
+[submodule "references/korean-dict-nikl"]
+	path = references/korean-dict-nikl
+	url = https://github.com/spellcheck-ko/korean-dict-nikl.git
