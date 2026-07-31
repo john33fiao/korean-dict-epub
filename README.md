@@ -12,7 +12,9 @@
 - Python 프로토타입은 `prototype/python/`에 있습니다.
 - 직전 프로토타입 실행에서는 XML 124개를 EPUB 124권으로 변환하고,
   원본 대조·내부 무결성·EPUBCheck 검사를 124/124권 통과했습니다.
-- Rust 변환기는 아직 구현 전이며, 이후의 주 구현 언어는 Rust로 정했습니다.
+- Rust 주 구현은 CLI 기반을 시작했으며 현재 `preflight` 명령으로 입력·출력
+  경로와 실행 정책을 읽기 전용으로 점검할 수 있습니다.
+- Rust의 XML 변환과 EPUB 생성은 아직 구현 전입니다.
 - 실제 전자책 앱·기기에서의 글꼴과 줄바꿈 확인은 남아 있습니다.
 - 생성된 EPUB, 검사 보고서, 캐시와 원본 데이터 자체는 부모 저장소의 커밋
   대상이 아닙니다.
@@ -74,7 +76,15 @@ python prototype/python/build_epubs.py --help
 git submodule update --init
 ```
 
-Rust CLI 명령은 구현 후 이 문서에 추가합니다.
+Rust 1.85 이상에서 현재 CLI 사전 점검을 실행합니다.
+
+```powershell
+cargo run -- preflight
+```
+
+기본 입력은 `references/korean-dict-nikl`, 기본 출력은 `outputs/rust`입니다.
+이 명령은 XML을 읽거나 출력 디렉터리를 만들지 않습니다. 현재 제공되는
+`preflight`는 KDEP-001 실행 계약이며 실제 변환 명령은 이후 구현합니다.
 
 ## 데이터와 저작권
 

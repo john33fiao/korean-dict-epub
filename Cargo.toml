@@ -1,0 +1,15 @@
+[package]
+name = "korean-dict-epub"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Convert NIKL dictionary XML files into sequential-reading EPUB 3 books"
+license = "MIT"
+repository = "https://github.com/john33fiao/korean-dict-epub"
+publish = false
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
