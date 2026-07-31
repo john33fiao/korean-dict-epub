@@ -1,5 +1,6 @@
 pub mod app;
 pub mod audit;
+pub mod batch;
 pub mod catalog;
 pub mod cli;
 pub mod epub;

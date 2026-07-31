@@ -17,9 +17,9 @@
   canonical digest를 읽기 전용으로 확인할 수 있습니다. `build`는 선택한
   사전 한 권을 EPUB 3로 생성하고 `audit`은 원본과 EPUB을 별도 코드 경로로
   다시 읽어 비교합니다.
-- 세 사전 첫 권은 Rust 독립 감사와 Python 기준선의 항목 수·첫/마지막 표제어
-  대조를 통과했습니다. 대표 krdict 1권은 EPUBCheck도 통과했지만, 전체
-  124권 실행은 아직 진행 전입니다.
+- Rust 전체 실행에서 XML/EPUB 124대 124, 총 1,697,692항목, 독립 감사
+  124/124권과 EPUBCheck 5.3.0 경고·오류 0을 확인했습니다. 생성 EPUB과
+  보고서는 로컬 산출물이며 저장소에는 포함하지 않습니다.
 - 실제 전자책 앱·기기에서의 글꼴과 줄바꿈 확인은 남아 있습니다.
 - 생성된 EPUB, 검사 보고서, 캐시와 원본 데이터 자체는 부모 저장소의 커밋
   대상이 아닙니다.
@@ -119,7 +119,20 @@ cargo run --release -- audit --dictionary krdict --volume 1
 
 감사기는 변환기의 source reader, renderer와 자체 manifest digest를 증거로
 재사용하지 않습니다. 필드 누락, 레코드·속성 순서, 속성 값과 제어문자 표식이
-달라지면 실패합니다. 전체 124권 일괄 실행은 이후 티켓에서 추가합니다.
+달라지면 실패합니다.
+
+선택한 사전 또는 전체 코퍼스를 파일 단위로 생성·감사하고, EPUBCheck JAR를
+지정한 경우 경고까지 실패로 검사합니다.
+
+```powershell
+cargo run --release -- batch --jobs 2 `
+  --epubcheck-jar C:\path\to\epubcheck.jar
+```
+
+기본 실행은 기존 EPUB이 하나라도 있으면 시작 전에 거부합니다. 중단된 로컬
+실행을 이어갈 때는 `--resume`, 전부 다시 만들 때는 `--overwrite`를
+명시합니다. EPUBCheck를 지정하지 않은 성공 보고서는 `passed`가 아니라
+`partial`입니다.
 
 ## 데이터와 저작권
 

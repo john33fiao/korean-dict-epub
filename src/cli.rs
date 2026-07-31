@@ -15,7 +15,8 @@ pub const DEFAULT_OUTPUT: &str = "outputs/rust";
     about = "Convert NIKL dictionary XML files into sequential-reading EPUB 3 books",
     long_about = "Rust implementation of the NIKL XML-to-EPUB converter.\n\
                   Preflight validates paths and policy; inspect reports one tracked XML digest; \
-                  build creates one tracked volume; audit independently compares source and EPUB.",
+                  build creates one tracked volume; audit independently compares source and EPUB; \
+                  batch processes a selected corpus with an aggregate report.",
     arg_required_else_help = true
 )]
 pub struct Cli {
@@ -36,6 +37,9 @@ pub enum Command {
 
     /// Independently compare one tracked XML volume with its generated EPUB
     Audit(AuditArgs),
+
+    /// Build and audit a selected corpus, optionally running strict EPUBCheck
+    Batch(BatchArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -136,6 +140,61 @@ pub struct AuditArgs {
     /// One-based volume number within the selected dictionary
     #[arg(long, value_name = "NUMBER", default_value = "1")]
     pub volume: NonZeroUsize,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct BatchArgs {
+    /// Root directory containing the Git-tracked dictionary inputs
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_SOURCE)]
+    pub source: PathBuf,
+
+    /// Local directory for EPUBs and JSON reports
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_OUTPUT)]
+    pub output: PathBuf,
+
+    /// Dictionary set to process
+    #[arg(long, value_enum, default_value_t = DictionarySelection::All)]
+    pub dictionary: DictionarySelection,
+
+    /// Maximum file-level worker count
+    #[arg(long, value_name = "COUNT", default_value = "1")]
+    pub jobs: NonZeroUsize,
+
+    /// Maximum complete entries per XHTML chapter
+    #[arg(
+        long,
+        value_name = "COUNT",
+        default_value_t = NonZeroUsize::new(DEFAULT_ENTRIES_PER_CHAPTER).expect("default is non-zero")
+    )]
+    pub entries_per_chapter: NonZeroUsize,
+
+    /// Target maximum serialized bytes per XHTML chapter
+    #[arg(
+        long,
+        value_name = "BYTES",
+        default_value_t = NonZeroUsize::new(DEFAULT_CHAPTER_BYTES).expect("default is non-zero")
+    )]
+    pub chapter_bytes: NonZeroUsize,
+
+    /// Atomically rebuild every selected EPUB
+    #[arg(long, conflicts_with = "resume")]
+    pub overwrite: bool,
+
+    /// Audit existing EPUBs and build only missing volumes
+    #[arg(long, conflicts_with = "overwrite")]
+    pub resume: bool,
+
+    /// Continue assigning volumes after a per-volume failure
+    #[arg(long)]
+    pub keep_going: bool,
+
+    /// EPUBCheck executable JAR; enables strict --failonwarnings validation
+    #[arg(long, value_name = "PATH")]
+    pub epubcheck_jar: Option<PathBuf>,
+
+    /// Java executable used with --epubcheck-jar
+    #[arg(long, value_name = "PATH", default_value = "java")]
+    pub java: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -275,5 +334,31 @@ mod tests {
         assert_eq!(args.output.to_string_lossy(), DEFAULT_OUTPUT);
         assert_eq!(args.dictionary, DictionaryName::Opendict);
         assert_eq!(args.volume.get(), 1);
+    }
+
+    #[test]
+    fn batch_defaults_are_safe_and_epubcheck_is_explicit() {
+        let cli = Cli::try_parse_from(["korean-dict-epub", "batch"])
+            .expect("batch arguments should parse");
+        let Command::Batch(args) = cli.command else {
+            panic!("batch command should be selected")
+        };
+
+        assert_eq!(args.source.to_string_lossy(), DEFAULT_SOURCE);
+        assert_eq!(args.output.to_string_lossy(), DEFAULT_OUTPUT);
+        assert_eq!(args.dictionary, DictionarySelection::All);
+        assert_eq!(args.jobs.get(), 1);
+        assert!(!args.overwrite);
+        assert!(!args.resume);
+        assert!(!args.keep_going);
+        assert!(args.epubcheck_jar.is_none());
+    }
+
+    #[test]
+    fn batch_rejects_overwrite_with_resume() {
+        let error = Cli::try_parse_from(["korean-dict-epub", "batch", "--overwrite", "--resume"])
+            .expect_err("overwrite and resume must conflict");
+
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
     }
 }

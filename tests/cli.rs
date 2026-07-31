@@ -90,6 +90,7 @@ fn help_exits_successfully() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("inspect"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("build"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("audit"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("batch"));
 }
 
 #[test]
@@ -284,4 +285,41 @@ fn build_writes_one_epub_and_requires_explicit_overwrite() {
     let mismatched = run(&audit_arguments);
     assert_eq!(mismatched.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&mismatched.stderr).contains("error[KDEP-E011]"));
+}
+
+#[test]
+fn batch_writes_partial_report_and_requires_resume_for_existing_outputs() {
+    let fixture = TempFixture::new();
+    let source = fixture.tracked_krdict_source(
+        "<LexicalResource><Lexicon><LexicalEntry><Lemma>\
+         <feat att=\"writtenForm\" val=\"배치어\"/></Lemma></LexicalEntry>\
+         </Lexicon></LexicalResource>",
+    );
+    let output_path = fixture.path().join("batch-output");
+    let source_argument = source.to_string_lossy().into_owned();
+    let output_argument = output_path.to_string_lossy().into_owned();
+    let arguments = [
+        "batch",
+        "--source",
+        source_argument.as_str(),
+        "--output",
+        output_argument.as_str(),
+        "--dictionary",
+        "krdict",
+    ];
+
+    let first = run(&arguments);
+    assert!(first.status.success());
+    assert!(String::from_utf8_lossy(&first.stdout).contains("status=partial"));
+    assert!(output_path.join("corpus-report.json").is_file());
+
+    let refused = run(&arguments);
+    assert_eq!(refused.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("error[KDEP-E012]"));
+
+    let mut resume_arguments = arguments.to_vec();
+    resume_arguments.push("--resume");
+    let resumed = run(&resume_arguments);
+    assert!(resumed.status.success());
+    assert!(String::from_utf8_lossy(&resumed.stdout).contains("status=partial"));
 }

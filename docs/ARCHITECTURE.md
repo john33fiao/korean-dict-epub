@@ -4,10 +4,11 @@
 
 - `prototype/python/`에는 전체 124권 생성과 검증에 사용한 Python 기준선이
   있습니다.
-- Rust 주 구현은 KDEP-004 단권 독립 감사까지 자동 검증됐습니다.
+- Rust 주 구현은 KDEP-005 전체 코퍼스 자동 검증까지 진행됐습니다.
   `preflight`는 경로와 실행 정책만 점검하고, `inspect`는 추적 XML 한 권의
   항목 수와 digest를 출력하며, `build`는 선택한 한 권을 EPUB 3로 생성하고
-  `audit`은 원본과 EPUB을 별도 코드 경로로 대조합니다.
+  `audit`은 원본과 EPUB을 별도 코드 경로로 대조합니다. `batch`는 선택한
+  catalog를 파일 단위로 생성·감사하고 선택적으로 EPUBCheck를 실행합니다.
 - `references/korean-dict-nikl`은 읽기 전용 입력으로 취급할 Git 서브모듈입니다.
 - 생성 EPUB과 보고서는 로컬 산출물이며 Git 추적 대상이 아닙니다.
 
@@ -132,6 +133,7 @@ check별 expected/actual 값과 재현 명령을 담고 같은 출력 디렉터�
 | `render` | generic record XHTML, 가시적 제어문자와 의미 CSS class |
 | `epub` | 단권 장 분할, OPF·nav·CSS와 결정적 ZIP 패키징 |
 | `audit` | 별도 원본 재독, EPUB record 복원, metadata 대조와 JSON 보고서 |
+| `batch` | 파일 worker, 재개·중단 정책, EPUBCheck와 전체 통합 보고서 |
 
 다음 이름은 이후 구현 방향이며 현재 파일이 존재한다는 뜻이 아닙니다.
 
@@ -148,6 +150,16 @@ check별 expected/actual 값과 재현 명령을 담고 같은 출력 디렉터�
   계속합니다.
 - 이미 존재하는 출력은 기본적으로 덮어쓰지 않습니다.
 - 실패한 권, 원인, 입력 파일과 검증 상태를 구조화된 보고서에 남깁니다.
+
+현재 `batch`는 catalog 순서의 권을 공유 queue에서 최대 `--jobs` worker에
+할당합니다. 각 worker는 한 권을 원자 생성한 다음 독립 감사를 통과시킨 뒤에만
+EPUBCheck를 실행합니다. `--keep-going`이 없으면 첫 실패가 관찰된 뒤 새 권
+할당을 중단하며, 이미 worker에 할당된 권은 마칠 수 있습니다.
+
+기존 EPUB이 있는 기본 실행은 어떤 권도 만들기 전에 실패합니다. `--resume`은
+기존 EPUB을 재생성하지 않고 독립 감사와 EPUBCheck를 다시 실행하며 누락된
+권만 생성합니다. 통합 보고서는 catalog 순서로 정렬하므로 worker 완료 순서와
+무관하게 안정적으로 읽을 수 있습니다.
 
 ## 도구 배포 구조
 

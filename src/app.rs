@@ -6,9 +6,10 @@ use std::fs::File;
 use std::path::{Component, Path, PathBuf};
 
 use crate::audit::{self, AuditError, AuditReport};
+use crate::batch::{self, BatchError, BatchOptions, CorpusReport, EpubCheckOptions};
 use crate::catalog::{self, CatalogError, Dictionary, Volume};
 use crate::cli::{
-    AuditArgs, BuildArgs, Cli, Command, DictionarySelection, InspectArgs, PreflightArgs,
+    AuditArgs, BatchArgs, BuildArgs, Cli, Command, DictionarySelection, InspectArgs, PreflightArgs,
 };
 use crate::epub::{self, BuildOptions, BuildReport, EpubError};
 use crate::record::{CanonicalDigest, DigestSummary, SourceRecord};
@@ -42,6 +43,7 @@ pub enum AppOutput {
     Inspection(InspectionReport),
     Build(BuildReport),
     Audit(Box<AuditReport>),
+    Batch(Box<CorpusReport>),
 }
 
 impl fmt::Display for AppOutput {
@@ -51,6 +53,7 @@ impl fmt::Display for AppOutput {
             Self::Inspection(report) => report.fmt(formatter),
             Self::Build(report) => report.fmt(formatter),
             Self::Audit(report) => report.fmt(formatter),
+            Self::Batch(report) => report.fmt(formatter),
         }
     }
 }
@@ -133,6 +136,7 @@ pub enum AppError {
     },
     Build(EpubError),
     Audit(AuditError),
+    Batch(BatchError),
 }
 
 impl AppError {
@@ -147,6 +151,7 @@ impl AppError {
             Self::Source { .. } => "KDEP-E007",
             Self::Build(error) => error.code(),
             Self::Audit(error) => error.code(),
+            Self::Batch(error) => error.code(),
         }
     }
 
@@ -202,6 +207,7 @@ impl fmt::Display for AppError {
             }
             Self::Build(error) => error.fmt(formatter),
             Self::Audit(error) => error.fmt(formatter),
+            Self::Batch(error) => error.fmt(formatter),
         }
     }
 }
@@ -213,6 +219,7 @@ impl Error for AppError {
             Self::Source { error, .. } => Some(error),
             Self::Build(error) => Some(error),
             Self::Audit(error) => Some(error),
+            Self::Batch(error) => Some(error),
             Self::InvalidSource { .. }
             | Self::MissingDictionaryDirectory { .. }
             | Self::InvalidOutput { .. }
@@ -228,7 +235,37 @@ pub fn run(cli: Cli) -> Result<AppOutput, AppError> {
         Command::Inspect(args) => inspect(args).map(AppOutput::Inspection),
         Command::Build(args) => build(args).map(AppOutput::Build),
         Command::Audit(args) => audit(args).map(|report| AppOutput::Audit(Box::new(report))),
+        Command::Batch(args) => batch(args).map(|report| AppOutput::Batch(Box::new(report))),
     }
+}
+
+fn batch(args: BatchArgs) -> Result<CorpusReport, AppError> {
+    let source_root = resolve_source(&args.source)?;
+    validate_dictionary_directories(&source_root, args.dictionary)?;
+    let output = resolve_output(&args.output)?;
+    validate_output_boundary(&source_root, &output)?;
+    let dictionaries = selected_dictionaries(args.dictionary);
+    let volumes = catalog::discover(&source_root, &dictionaries).map_err(AppError::Catalog)?;
+    batch::run_batch(
+        volumes,
+        &output,
+        BatchOptions {
+            jobs: args.jobs.get(),
+            overwrite: args.overwrite,
+            resume: args.resume,
+            keep_going: args.keep_going,
+            build: BuildOptions {
+                entries_per_chapter: args.entries_per_chapter.get(),
+                chapter_bytes: args.chapter_bytes.get(),
+                overwrite: args.overwrite,
+            },
+            epubcheck: args.epubcheck_jar.map(|jar| EpubCheckOptions {
+                java: args.java,
+                jar,
+            }),
+        },
+    )
+    .map_err(AppError::Batch)
 }
 
 fn audit(args: AuditArgs) -> Result<AuditReport, AppError> {
@@ -324,6 +361,15 @@ const fn dictionary_selection(dictionary: Dictionary) -> DictionarySelection {
         Dictionary::Krdict => DictionarySelection::Krdict,
         Dictionary::Stdict => DictionarySelection::Stdict,
         Dictionary::Opendict => DictionarySelection::Opendict,
+    }
+}
+
+fn selected_dictionaries(selection: DictionarySelection) -> Vec<Dictionary> {
+    match selection {
+        DictionarySelection::All => Dictionary::ALL.to_vec(),
+        DictionarySelection::Krdict => vec![Dictionary::Krdict],
+        DictionarySelection::Stdict => vec![Dictionary::Stdict],
+        DictionarySelection::Opendict => vec![Dictionary::Opendict],
     }
 }
 
