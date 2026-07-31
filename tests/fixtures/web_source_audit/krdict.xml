@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LexicalResource>
+  <Lexicon>
+    <LexicalEntry att="id" val="1">
+      <feat att="homonym_number" val="1"/>
+      <Lemma><feat att="writtenForm" val="원본"/></Lemma>
+      <Sense att="id" val="1">
+        <SenseRelation>
+          <feat att="type" val="비슷한말"/>
+          <feat att="id" val="2"/>
+          <feat att="lemma" val="대상"/>
+          <feat att="homonymNumber" val="1"/>
+        </SenseRelation>
+        <SenseRelation>
+          <feat att="type" val="반대말"/>
+          <feat att="id" val="99"/>
+          <feat att="lemma" val="없음"/>
+          <feat att="homonymNumber" val="1"/>
+        </SenseRelation>
+        <SenseRelation>
+          <feat att="type" val="관련어"/>
+          <feat att="id" val="3"/>
+          <feat att="lemma" val="중복"/>
+          <feat att="homonymNumber" val="1"/>
+        </SenseRelation>
+        <SenseRelation>
+          <feat att="type" val="자기"/>
+          <feat att="id" val="1"/>
+          <feat att="lemma" val="원본"/>
+          <feat att="homonymNumber" val="1"/>
+        </SenseRelation>
+      </Sense>
+    </LexicalEntry>
+    <LexicalEntry att="id" val="2">
+      <feat att="homonym_number" val="1"/>
+      <Lemma><feat att="writtenForm" val="대상"/></Lemma>
+      <Sense att="id" val="1">
+        <SenseRelation>
+          <feat att="type" val="역방향"/>
+          <feat att="id" val="1"/>
+          <feat att="lemma" val="원본"/>
+          <feat att="homonymNumber" val="1"/>
+        </SenseRelation>
+      </Sense>
+    </LexicalEntry>
+    <LexicalEntry att="id" val="3">
+      <feat att="homonym_number" val="1"/>
+      <Lemma><feat att="writtenForm" val="중복"/></Lemma>
+      <Sense att="id" val="1"/>
+    </LexicalEntry>
+    <LexicalEntry att="id" val="3">
+      <feat att="homonym_number" val="1"/>
+      <Lemma><feat att="writtenForm" val="중복"/></Lemma>
+      <Sense att="id" val="1"/>
+    </LexicalEntry>
+  </Lexicon>
+</LexicalResource>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel>
+  <item>
+    <target_code>10</target_code>
+    <word_info>
+      <word><![CDATA[원본]]></word>
+      <lexical_info>
+        <word><![CDATA[대상]]></word><unit><![CDATA[어휘]]></unit><type>참고 어휘</type>
+        <link_target_code>20</link_target_code>
+        <link><![CDATA[https://stdict.korean.go.kr/search/searchView.do?word_no=20&searchKeywordTo=3]]></link>
+      </lexical_info>
+      <pos_info>
+        <pos_code>1001</pos_code>
+        <lexical_info>
+          <word><![CDATA[대상]]></word><unit><![CDATA[품사]]></unit><type>비슷한말</type>
+          <link_target_code>2001</link_target_code>
+          <link><![CDATA[https://stdict.korean.go.kr/search/searchView.do?word_no=20&searchKeywordTo=3]]></link>
+        </lexical_info>
+        <comm_pattern_info>
+          <comm_pattern_code>1001001</comm_pattern_code>
+          <lexical_info>
+            <word><![CDATA[대상]]></word><unit><![CDATA[공통 문형]]></unit><type>비슷한말</type>
+            <link_target_code>2001001</link_target_code>
+            <link><![CDATA[https://stdict.korean.go.kr/search/searchView.do?word_no=20&searchKeywordTo=3]]></link>
+          </lexical_info>
+          <sense_info>
+            <sense_code>101</sense_code>
+            <lexical_info>
+              <word><![CDATA[대상]]></word><unit><![CDATA[의미]]></unit><type>동의어</type>
+              <link_target_code>201</link_target_code>
+              <link><![CDATA[https://stdict.korean.go.kr/search/searchView.do?word_no=20&searchKeywordTo=3]]></link>
+            </lexical_info>
+            <lexical_info>
+              <word><![CDATA[대상]]></word><unit><![CDATA[의미]]></unit><type>충돌</type>
+              <link_target_code>201</link_target_code>
+              <link><![CDATA[https://stdict.korean.go.kr/search/searchView.do?word_no=999&searchKeywordTo=3]]></link>
+            </lexical_info>
+          </sense_info>
+        </comm_pattern_info>
+      </pos_info>
+    </word_info>
+  </item>
+  <item>
+    <target_code>20</target_code>
+    <word_info>
+      <word><![CDATA[대상]]></word>
+      <pos_info>
+        <pos_code>2001</pos_code>
+        <comm_pattern_info>
+          <comm_pattern_code>2001001</comm_pattern_code>
+          <sense_info><sense_code>201</sense_code></sense_info>
+        </comm_pattern_info>
+      </pos_info>
+    </word_info>
+  </item>
+</channel>

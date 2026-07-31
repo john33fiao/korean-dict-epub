@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::str;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Dictionary {
     Krdict,
     Stdict,
@@ -288,7 +288,9 @@ mod tests {
     use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{Dictionary, discover, git_safe_directory};
+    #[cfg(windows)]
+    use super::git_safe_directory;
+    use super::{Dictionary, discover};
 
     static TEMP_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel>
+  <item>
+    <target_code>100</target_code><group_order>1</group_order>
+    <wordInfo><word><![CDATA[원본]]></word></wordInfo>
+    <senseInfo>
+      <sense_no>001</sense_no>
+      <relation_info>
+        <word><![CDATA[대상001]]></word><type>상위어</type><link_target_code>200</link_target_code>
+        <link><![CDATA[http://opendict.korean.go.kr/dictionary/view?sense_no=200]]></link>
+      </relation_info>
+      <relation_info>
+        <word><![CDATA[없음001]]></word><type>하위어</type><link_target_code>999</link_target_code>
+        <link><![CDATA[http://opendict.korean.go.kr/dictionary/view?sense_no=999]]></link>
+      </relation_info>
+      <relation_info>
+        <word><![CDATA[원본001]]></word><type>자기</type><link_target_code>100</link_target_code>
+        <link><![CDATA[http://opendict.korean.go.kr/dictionary/view?sense_no=100]]></link>
+      </relation_info>
+    </senseInfo>
+  </item>
+  <item>
+    <target_code>200</target_code><group_order>1</group_order>
+    <wordInfo><word><![CDATA[대상]]></word></wordInfo>
+    <senseInfo>
+      <sense_no>001</sense_no>
+      <relation_info>
+        <word><![CDATA[원본001]]></word><type>역방향</type><link_target_code>100</link_target_code>
+        <link><![CDATA[http://opendict.korean.go.kr/dictionary/view?sense_no=100]]></link>
+      </relation_info>
+    </senseInfo>
+  </item>
+</channel>
