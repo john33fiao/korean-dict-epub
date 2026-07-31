@@ -12,12 +12,14 @@
 - Python 프로토타입은 `prototype/python/`에 있습니다.
 - 직전 프로토타입 실행에서는 XML 124개를 EPUB 124권으로 변환하고,
   원본 대조·내부 무결성·EPUBCheck 검사를 124/124권 통과했습니다.
-- Rust 주 구현은 손실 없는 XML 레코드 계층까지 진행됐습니다. `preflight`로
+- Rust 주 구현은 단권 생성·독립 감사까지 진행됐습니다. `preflight`로
   입력·출력 경로와 정책을 점검하고 `inspect`로 추적 XML 한 권의 항목 수와
   canonical digest를 읽기 전용으로 확인할 수 있습니다. `build`는 선택한
-  사전 한 권을 EPUB 3로 생성합니다.
-- Rust 단권 EPUB 생성은 자동 검증과 대표 krdict 1권 EPUBCheck를 통과했지만,
-  전체 124권 실행과 독립 감사는 아직 진행 전입니다.
+  사전 한 권을 EPUB 3로 생성하고 `audit`은 원본과 EPUB을 별도 코드 경로로
+  다시 읽어 비교합니다.
+- 세 사전 첫 권은 Rust 독립 감사와 Python 기준선의 항목 수·첫/마지막 표제어
+  대조를 통과했습니다. 대표 krdict 1권은 EPUBCheck도 통과했지만, 전체
+  124권 실행은 아직 진행 전입니다.
 - 실제 전자책 앱·기기에서의 글꼴과 줄바꿈 확인은 남아 있습니다.
 - 생성된 EPUB, 검사 보고서, 캐시와 원본 데이터 자체는 부모 저장소의 커밋
   대상이 아닙니다.
@@ -106,8 +108,18 @@ cargo run --release -- build --dictionary krdict --volume 1
 ```
 
 기존 파일은 기본적으로 덮어쓰지 않습니다. 의도적으로 교체할 때만
-`--overwrite`를 사용합니다. 전체 124권 일괄 실행과 독립 감사 명령은 이후
-티켓에서 추가합니다.
+`--overwrite`를 사용합니다.
+
+생성된 한 권을 원본과 독립적으로 대조하고 같은 출력 디렉터리에 결정적 JSON
+보고서를 기록합니다.
+
+```powershell
+cargo run --release -- audit --dictionary krdict --volume 1
+```
+
+감사기는 변환기의 source reader, renderer와 자체 manifest digest를 증거로
+재사용하지 않습니다. 필드 누락, 레코드·속성 순서, 속성 값과 제어문자 표식이
+달라지면 실패합니다. 전체 124권 일괄 실행은 이후 티켓에서 추가합니다.
 
 ## 데이터와 저작권
 

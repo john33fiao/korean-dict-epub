@@ -4,9 +4,10 @@
 
 - `prototype/python/`에는 전체 124권 생성과 검증에 사용한 Python 기준선이
   있습니다.
-- Rust 주 구현은 KDEP-003 단권 EPUB 작성까지 자동 검증됐습니다.
+- Rust 주 구현은 KDEP-004 단권 독립 감사까지 자동 검증됐습니다.
   `preflight`는 경로와 실행 정책만 점검하고, `inspect`는 추적 XML 한 권의
-  항목 수와 digest를 출력하며, `build`는 선택한 한 권을 EPUB 3로 생성합니다.
+  항목 수와 digest를 출력하며, `build`는 선택한 한 권을 EPUB 3로 생성하고
+  `audit`은 원본과 EPUB을 별도 코드 경로로 대조합니다.
 - `references/korean-dict-nikl`은 읽기 전용 입력으로 취급할 Git 서브모듈입니다.
 - 생성 EPUB과 보고서는 로컬 산출물이며 Git 추적 대상이 아닙니다.
 
@@ -104,13 +105,25 @@ atomic temporary file에 완성·내부 점검한 뒤에만 최종 경로로 com
 3. EPUBCheck는 EPUB 표준 구조와 XHTML/OPF/nav/CSS를 검사합니다.
 4. 일반 EPUB 도구 재열기와 실제 기기 QA는 소비자 관점의 검증을 담당합니다.
 
+현재 감사기는 `source`·`record`·`render` 모듈을 호출하지 않습니다. 별도
+제어문자 escape prefix와 streaming XML frame, canonical digest v1 encoder를
+사용해 원본을 다시 읽습니다. 완성 EPUB은 OPF manifest/spine 순서로 XHTML을
+열고 `data-kdep-record` markup에서 QName, 원래 순서의 속성, text/tail과
+제어문자를 재구성합니다. title page에 기록된 digest는 비교 근거로 사용하지
+않습니다.
+
+권별 `kdep-audit-report-v1` JSON은 source/EPUB summary, package metadata,
+check별 expected/actual 값과 재현 명령을 담고 같은 출력 디렉터리에 원자
+교체됩니다. 내용 불일치는 `KDEP-E011`, 입력·구조·직렬화 오류는
+`KDEP-E010`으로 구분합니다.
+
 ## 예정된 Rust 모듈
 
 현재 구현:
 
 | 모듈 | 책임 |
 | --- | --- |
-| `cli` | `preflight`·`inspect` 명령, 옵션과 안전 기본값 |
+| `cli` | `preflight`·`inspect`·`build`·`audit` 명령과 안전 기본값 |
 | `app` | 입력·출력 경계, 단권 검사, 오류 코드와 종료 정책 |
 | `main` | 표준 출력·오류와 프로세스 종료 코드 연결 |
 | `catalog` | Git 추적 XML, 사전·권 번호와 출력 파일명 |
@@ -118,13 +131,12 @@ atomic temporary file에 완성·내부 점검한 뒤에만 최종 경로로 com
 | `record` | 손실 없는 `SourceRecord`와 canonical digest v1 |
 | `render` | generic record XHTML, 가시적 제어문자와 의미 CSS class |
 | `epub` | 단권 장 분할, OPF·nav·CSS와 결정적 ZIP 패키징 |
+| `audit` | 별도 원본 재독, EPUB record 복원, metadata 대조와 JSON 보고서 |
 
 다음 이름은 이후 구현 방향이며 현재 파일이 존재한다는 뜻이 아닙니다.
 
 | 모듈 | 책임 |
 | --- | --- |
-| `cli` | 명령, 옵션, 종료 코드와 진행 출력 |
-| `audit` | 원본-EPUB 독립 대조 |
 | `report` | 빌드·검증 JSON 보고서 |
 
 ## 성능과 실패 처리

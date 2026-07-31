@@ -5,8 +5,11 @@ use std::fs;
 use std::fs::File;
 use std::path::{Component, Path, PathBuf};
 
+use crate::audit::{self, AuditError, AuditReport};
 use crate::catalog::{self, CatalogError, Dictionary, Volume};
-use crate::cli::{BuildArgs, Cli, Command, DictionarySelection, InspectArgs, PreflightArgs};
+use crate::cli::{
+    AuditArgs, BuildArgs, Cli, Command, DictionarySelection, InspectArgs, PreflightArgs,
+};
 use crate::epub::{self, BuildOptions, BuildReport, EpubError};
 use crate::record::{CanonicalDigest, DigestSummary, SourceRecord};
 use crate::source::{SourceError, SourceRecordReader};
@@ -38,6 +41,7 @@ pub enum AppOutput {
     Preflight(PreflightPlan),
     Inspection(InspectionReport),
     Build(BuildReport),
+    Audit(Box<AuditReport>),
 }
 
 impl fmt::Display for AppOutput {
@@ -46,6 +50,7 @@ impl fmt::Display for AppOutput {
             Self::Preflight(plan) => plan.fmt(formatter),
             Self::Inspection(report) => report.fmt(formatter),
             Self::Build(report) => report.fmt(formatter),
+            Self::Audit(report) => report.fmt(formatter),
         }
     }
 }
@@ -127,6 +132,7 @@ pub enum AppError {
         error: SourceError,
     },
     Build(EpubError),
+    Audit(AuditError),
 }
 
 impl AppError {
@@ -140,6 +146,7 @@ impl AppError {
             Self::InvalidVolume { .. } => "KDEP-E006",
             Self::Source { .. } => "KDEP-E007",
             Self::Build(error) => error.code(),
+            Self::Audit(error) => error.code(),
         }
     }
 
@@ -194,6 +201,7 @@ impl fmt::Display for AppError {
                 write!(formatter, "could not inspect '{}': {error}", path.display())
             }
             Self::Build(error) => error.fmt(formatter),
+            Self::Audit(error) => error.fmt(formatter),
         }
     }
 }
@@ -204,6 +212,7 @@ impl Error for AppError {
             Self::Catalog(error) => Some(error),
             Self::Source { error, .. } => Some(error),
             Self::Build(error) => Some(error),
+            Self::Audit(error) => Some(error),
             Self::InvalidSource { .. }
             | Self::MissingDictionaryDirectory { .. }
             | Self::InvalidOutput { .. }
@@ -218,7 +227,24 @@ pub fn run(cli: Cli) -> Result<AppOutput, AppError> {
         Command::Preflight(args) => preflight(args).map(AppOutput::Preflight),
         Command::Inspect(args) => inspect(args).map(AppOutput::Inspection),
         Command::Build(args) => build(args).map(AppOutput::Build),
+        Command::Audit(args) => audit(args).map(|report| AppOutput::Audit(Box::new(report))),
     }
+}
+
+fn audit(args: AuditArgs) -> Result<AuditReport, AppError> {
+    let source_root = resolve_source(&args.source)?;
+    let dictionary = args.dictionary.into();
+    validate_dictionary_directories(&source_root, dictionary_selection(dictionary))?;
+    let output = resolve_output(&args.output)?;
+    validate_output_boundary(&source_root, &output)?;
+    let catalog = catalog::discover(&source_root, &[dictionary]).map_err(AppError::Catalog)?;
+    let requested = args.volume.get();
+    let volume = catalog.get(requested - 1).ok_or(AppError::InvalidVolume {
+        dictionary,
+        requested,
+        available: catalog.len(),
+    })?;
+    audit::audit_volume(volume, &output).map_err(AppError::Audit)
 }
 
 fn build(args: BuildArgs) -> Result<BuildReport, AppError> {

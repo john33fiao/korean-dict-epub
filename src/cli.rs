@@ -15,7 +15,7 @@ pub const DEFAULT_OUTPUT: &str = "outputs/rust";
     about = "Convert NIKL dictionary XML files into sequential-reading EPUB 3 books",
     long_about = "Rust implementation of the NIKL XML-to-EPUB converter.\n\
                   Preflight validates paths and policy; inspect reports one tracked XML digest; \
-                  build creates one tracked volume as an EPUB 3 book.",
+                  build creates one tracked volume; audit independently compares source and EPUB.",
     arg_required_else_help = true
 )]
 pub struct Cli {
@@ -33,6 +33,9 @@ pub enum Command {
 
     /// Build one tracked XML volume as an EPUB 3 book
     Build(BuildArgs),
+
+    /// Independently compare one tracked XML volume with its generated EPUB
+    Audit(AuditArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -114,6 +117,25 @@ pub struct BuildArgs {
     /// Atomically replace an existing EPUB with the same filename
     #[arg(long)]
     pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AuditArgs {
+    /// Root directory containing the Git-tracked dictionary inputs
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_SOURCE)]
+    pub source: PathBuf,
+
+    /// Local directory containing the generated EPUB
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_OUTPUT)]
+    pub output: PathBuf,
+
+    /// Dictionary containing the volume
+    #[arg(long, value_enum)]
+    pub dictionary: DictionaryName,
+
+    /// One-based volume number within the selected dictionary
+    #[arg(long, value_name = "NUMBER", default_value = "1")]
+    pub volume: NonZeroUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -239,5 +261,19 @@ mod tests {
         assert_eq!(args.entries_per_chapter.get(), DEFAULT_ENTRIES_PER_CHAPTER);
         assert_eq!(args.chapter_bytes.get(), DEFAULT_CHAPTER_BYTES);
         assert!(!args.overwrite);
+    }
+
+    #[test]
+    fn audit_defaults_to_expected_local_output_and_first_volume() {
+        let cli = Cli::try_parse_from(["korean-dict-epub", "audit", "--dictionary", "opendict"])
+            .expect("audit arguments should parse");
+        let Command::Audit(args) = cli.command else {
+            panic!("audit command should be selected")
+        };
+
+        assert_eq!(args.source.to_string_lossy(), DEFAULT_SOURCE);
+        assert_eq!(args.output.to_string_lossy(), DEFAULT_OUTPUT);
+        assert_eq!(args.dictionary, DictionaryName::Opendict);
+        assert_eq!(args.volume.get(), 1);
     }
 }

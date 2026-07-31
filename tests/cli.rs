@@ -89,6 +89,7 @@ fn help_exits_successfully() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("preflight"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("inspect"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("build"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("audit"));
 }
 
 #[test]
@@ -254,4 +255,33 @@ fn build_writes_one_epub_and_requires_explicit_overwrite() {
     overwrite_arguments.push("--overwrite");
     let overwritten = run(&overwrite_arguments);
     assert!(overwritten.status.success());
+
+    let audit_arguments = [
+        "audit",
+        "--source",
+        source_argument.as_str(),
+        "--output",
+        output_argument.as_str(),
+        "--dictionary",
+        "krdict",
+    ];
+    let audited = run(&audit_arguments);
+    assert!(audited.status.success());
+    assert!(String::from_utf8_lossy(&audited.stdout).contains("status=passed"));
+    assert!(
+        output_path
+            .join("01-한국어기초사전-001-of-001.epub.audit.json")
+            .is_file()
+    );
+
+    fs::write(
+        source.join("krdict").join("001.xml"),
+        "<LexicalResource><Lexicon><LexicalEntry><Lemma>\
+         <feat att=\"writtenForm\" val=\"변경어\"/></Lemma></LexicalEntry>\
+         </Lexicon></LexicalResource>",
+    )
+    .expect("tracked source fixture should be mutable");
+    let mismatched = run(&audit_arguments);
+    assert_eq!(mismatched.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&mismatched.stderr).contains("error[KDEP-E011]"));
 }

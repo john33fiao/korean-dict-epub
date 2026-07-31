@@ -126,10 +126,17 @@
   무압축으로 기록합니다.
 - 기존 EPUB은 기본적으로 거부하고 `--overwrite`를 명시한 경우에만 같은
   디렉터리의 임시 파일을 원자적으로 교체합니다.
+- `audit`은 선택한 추적 XML과 표준 파일명의 EPUB을 직접 다시 읽고 canonical
+  record digest·개수, 항목·표제어 순서와 package metadata를 대조합니다.
+  변환기의 source reader, renderer와 title page digest를 감사 증거로
+  재사용하지 않습니다.
+- 감사 결과는 `kdep-audit-report-v1` JSON으로 EPUB과 같은 로컬 출력
+  디렉터리에 원자적으로 기록합니다. 보고서에는 입력 권, 각 비교값, 실패한
+  check와 재현 명령을 남깁니다.
 
 ## 남은 결정
 
-- Rust `validate`, `audit`의 세부 옵션과 보고서 schema
+- 전체 배치 `validate`의 세부 옵션과 통합 보고서 schema
 - Python 프로토타입을 언제까지 유지할지와 제거 조건
 - 개인용 생성 EPUB에 출처 안내 페이지를 선택적으로 넣을지 여부
 - 실제 사용할 전자책 앱·기기와 옛한글 글꼴·줄바꿈 수용 기준
