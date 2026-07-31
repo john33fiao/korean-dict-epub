@@ -22,6 +22,10 @@
 /tmp/
 *.epub
 *.epub.tmp
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 build-manifest.json
 source-audit.json
 epub-audit.json

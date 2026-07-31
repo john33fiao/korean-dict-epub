@@ -7,4 +7,6 @@ pub mod epub;
 pub mod record;
 pub mod render;
 pub mod source;
+pub mod web_db;
+pub mod web_identity;
 pub mod web_source_audit;

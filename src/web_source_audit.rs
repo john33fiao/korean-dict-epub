@@ -13,6 +13,9 @@ use serde::Serialize;
 use crate::catalog::{self, Dictionary, Volume};
 use crate::record::{SourceAttribute, SourceRecord};
 use crate::source::{SourceError, SourceRecordReader};
+use crate::web_identity::{CanonicalIdParts, canonical_id as build_canonical_id};
+
+pub use crate::web_identity::{EntityKind, RelationStatus};
 
 pub const REPORT_SCHEMA: &str = "kweb-source-identifiers-relations-v1";
 pub const DEFAULT_SOURCE: &str = "references/korean-dict-nikl";
@@ -131,42 +134,6 @@ impl From<serde_json::Error> for WebSourceAuditError {
     fn from(error: serde_json::Error) -> Self {
         Self::Serialization(error)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EntityKind {
-    Entry,
-    PartOfSpeech,
-    CommonPattern,
-    Sense,
-}
-
-impl EntityKind {
-    const ALL: [Self; 4] = [
-        Self::Entry,
-        Self::PartOfSpeech,
-        Self::CommonPattern,
-        Self::Sense,
-    ];
-
-    const fn key(self) -> &'static str {
-        match self {
-            Self::Entry => "entry",
-            Self::PartOfSpeech => "part_of_speech",
-            Self::CommonPattern => "common_pattern",
-            Self::Sense => "sense",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RelationStatus {
-    Resolved,
-    SelfReference,
-    Unresolved,
-    Ambiguous,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -905,17 +872,17 @@ impl EntryBuilder {
             return;
         };
         let value = attribute(attributes, "val").unwrap_or_default();
-        if let Some(relation) = self.current_relation.as_mut() {
-            if self.path.last().is_some_and(|name| name == "SenseRelation") {
-                match field.as_str() {
-                    "type" => relation.fields.relation_types.push(value),
-                    "id" => relation.fields.target_keys.push(value),
-                    "lemma" => relation.fields.words.push(value),
-                    "homonymNumber" => relation.fields.homonyms.push(value),
-                    _ => {}
-                }
-                return;
+        if let Some(relation) = self.current_relation.as_mut()
+            && self.path.last().is_some_and(|name| name == "SenseRelation")
+        {
+            match field.as_str() {
+                "type" => relation.fields.relation_types.push(value),
+                "id" => relation.fields.target_keys.push(value),
+                "lemma" => relation.fields.words.push(value),
+                "homonymNumber" => relation.fields.homonyms.push(value),
+                _ => {}
             }
+            return;
         }
         if field == "writtenForm" && self.path.iter().any(|name| name == "Lemma") {
             set_once(&mut self.data.headword, value);
@@ -973,10 +940,10 @@ impl EntryBuilder {
     }
 
     fn end(&mut self, name: &str) {
-        if self.is_relation_container(name) {
-            if let Some(relation) = self.current_relation.take() {
-                self.data.relations.push(relation);
-            }
+        if self.is_relation_container(name)
+            && let Some(relation) = self.current_relation.take()
+        {
+            self.data.relations.push(relation);
         }
         match (self.dictionary, name) {
             (Dictionary::Krdict, "Sense")
@@ -1204,34 +1171,21 @@ fn canonical_id(
     entry_id: Option<&str>,
     files: &[String],
 ) -> String {
-    let key = normalized_key(entity.key.as_deref())
-        .map(percent_encode)
-        .unwrap_or_else(|| "missing".to_owned());
     let locator = format_locator(dictionary, entity.locator, files);
-    if entity.kind == EntityKind::Entry {
-        let mut value = format!(
-            "kweb:v1/{}/{}/entry/{key}",
-            percent_encode(source_commit),
-            dictionary.key()
-        );
-        if global_occurrences != 1 {
-            value.push_str("/at/");
-            value.push_str(&percent_encode(&locator));
-        }
-        return value;
-    }
-
-    let mut value = format!(
-        "{}/{}/{}",
-        entry_id.expect("nested entities have an owning entry"),
-        entity.kind.key(),
-        key
-    );
-    if within_entry_occurrences != 1 {
-        value.push_str("/at/");
-        value.push_str(&percent_encode(&locator));
-    }
-    value
+    build_canonical_id(CanonicalIdParts {
+        corpus_commit: source_commit,
+        dictionary,
+        entity_kind: entity.kind,
+        native_key: normalized_key(entity.key.as_deref()),
+        owning_entry_id: entry_id,
+        source_locator: &locator,
+        namespace_occurrences: if entity.kind == EntityKind::Entry {
+            global_occurrences
+        } else {
+            within_entry_occurrences
+        },
+    })
+    .expect("source audit canonical ID inputs are validated")
 }
 
 fn source_ids(
@@ -1272,19 +1226,6 @@ fn source_ids(
         files,
     );
     (entity_id, entry_id)
-}
-
-fn percent_encode(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            output.push(char::from(byte));
-        } else {
-            use std::fmt::Write as _;
-            write!(output, "%{byte:02X}").expect("writing to String cannot fail");
-        }
-    }
-    output
 }
 
 fn resolve_relations(
@@ -1413,21 +1354,19 @@ fn resolve_relation(
         }
     }
 
-    if relation.dictionary == Dictionary::Krdict {
-        if let Some(homonym) = single(&relation.fields.homonyms) {
-            let matching = eligible
-                .iter()
-                .copied()
-                .filter(|candidate| {
-                    candidate.homonym.as_deref().map(str::trim) == Some(homonym.trim())
-                })
-                .collect::<Vec<_>>();
-            if !eligible.is_empty() && matching.is_empty() {
-                conflicts
-                    .push("relation homonym number conflicts with all keyed candidates".to_owned());
-            } else if !matching.is_empty() {
-                eligible = matching;
-            }
+    if relation.dictionary == Dictionary::Krdict
+        && let Some(homonym) = single(&relation.fields.homonyms)
+    {
+        let matching = eligible
+            .iter()
+            .copied()
+            .filter(|candidate| candidate.homonym.as_deref().map(str::trim) == Some(homonym.trim()))
+            .collect::<Vec<_>>();
+        if !eligible.is_empty() && matching.is_empty() {
+            conflicts
+                .push("relation homonym number conflicts with all keyed candidates".to_owned());
+        } else if !matching.is_empty() {
+            eligible = matching;
         }
     }
 

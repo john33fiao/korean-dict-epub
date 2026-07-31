@@ -89,7 +89,8 @@
 ### 로컬 웹사전 경계
 
 이 경계의 아키텍처 결정은
-[`ADR-0009`](decisions/0009-local-web-app-boundary.md)에 기록합니다.
+[`ADR-0009`](decisions/0009-local-web-app-boundary.md)와
+[`ADR-0010`](decisions/0010-sqlite-schema-v1.md)에 기록합니다.
 
 - 웹사전은 EPUB 변환기와 같은 저장소에서 개발하되 별도 Rust 실행
   바이너리로 구성합니다. XML 파싱·원본 보존·감사에 필요한 공통 코드는
@@ -103,6 +104,11 @@
   활성 DB로 적용합니다.
 - 선택한 DB는 앱 내부로 복사하지 않고 원래 로컬 경로에서 사용합니다. 선택·
   검증이나 적용이 실패하면 기존 활성 DB를 유지합니다.
+- schema v1은 bundled SQLite의 `STRICT, WITHOUT ROWID` table을 사용합니다.
+  원문 native key와 canonical ID를 분리하고, 손실 없는 source record·속성과
+  조회 projection·관계를 별도 table에 저장합니다. migration checksum과
+  schema fingerprint가 일치하는 read-only 검증 성공 결과만 활성 DB 적용의
+  입력으로 사용할 수 있습니다.
 - KURE model과 `llama.cpp` runtime은 웹사전 바이너리에 포함하지 않습니다.
   사용자의 PC 또는 Mac에 이미 준비된 로컬 자산을 별도 설정 화면에서
   선택·검증·적용합니다. vector index는 바이너리 밖의 재생성 가능한 로컬
@@ -130,7 +136,7 @@
   `references/korean-dict-nikl`, 기본 출력 `outputs/rust`, 사전 선택과 1 이상의
   병렬도, 덮어쓰기·계속 실행 정책을 확인하되 XML이나 출력 파일은 건드리지
   않습니다.
-- Rust 2024 edition과 MSRV 1.85를 사용합니다. CLI 사용 오류와 실행 전 경로
+- Rust 2024 edition과 MSRV 1.95를 사용합니다. CLI 사용 오류와 실행 전 경로
   오류는 서로 다른 종료 코드와 구조화된 오류 코드로 구분합니다.
 - Rust 보존 계층은 원본 순서의 시작·종료·빈 요소, 속성, 요소 텍스트와 tail
   텍스트를 `SourceRecord`로 스트리밍합니다. 레코드 digest는 버전이 고정된

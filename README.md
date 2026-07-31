@@ -97,7 +97,7 @@ python prototype/python/build_epubs.py --help
 git submodule update --init
 ```
 
-Rust 1.85 이상에서 현재 CLI 사전 점검을 실행합니다.
+Rust 1.95 이상에서 현재 CLI와 로컬 웹사전 공통 코드를 실행합니다.
 
 ```powershell
 cargo run -- preflight

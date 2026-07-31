@@ -9,12 +9,16 @@
   항목 수와 digest를 출력하며, `build`는 선택한 한 권을 EPUB 3로 생성하고
   `audit`은 원본과 EPUB을 별도 코드 경로로 대조합니다. `batch`는 선택한
   catalog를 파일 단위로 생성·감사하고 선택적으로 EPUBCheck를 실행합니다.
+- Rust 2024 edition과 MSRV 1.95를 사용합니다. MSRV 변경 근거는
+  [`ADR-0011`](decisions/0011-rust-1-95-msrv.md)에 기록합니다.
 - `references/korean-dict-nikl`은 읽기 전용 입력으로 취급할 Git 서브모듈입니다.
 - 생성 EPUB과 보고서는 로컬 산출물이며 Git 추적 대상이 아닙니다.
 
 웹사전은 같은 저장소의 후속 제품 트랙입니다. 기존 EPUB CLI와 실행
 바이너리를 분리하고, 공통 XML 입력·보존·감사 코드는 저장소 안에서
-공유합니다. 웹사전 구현과 브라우저 QA는 아직 시작하지 않았습니다.
+공유합니다. KWEB-003의 SQLite schema·migration·read-only 검증 API가
+구현됐으며 XML importer, 실행 바이너리와 브라우저 QA는 아직 시작하지
+않았습니다.
 
 ## 목표 흐름
 
@@ -138,6 +142,9 @@ check별 expected/actual 값과 재현 명령을 담고 같은 출력 디렉터�
 | `epub` | 단권 장 분할, OPF·nav·CSS와 결정적 ZIP 패키징 |
 | `audit` | 별도 원본 재독, EPUB record 복원, metadata 대조와 JSON 보고서 |
 | `batch` | 파일 worker, 재개·중단 정책, EPUBCheck와 전체 통합 보고서 |
+| `web_identity` | KWEB canonical entity·relation enum과 `kweb:v1/...` ID 생성 |
+| `web_source_audit` | 전체 XML entity·관계 조사와 KWEB-002 보고서 |
+| `web_db` | SQLite schema v1 생성·forward migration·read-only 검증 |
 
 다음 이름은 이후 구현 방향이며 현재 파일이 존재한다는 뜻이 아닙니다.
 
@@ -181,7 +188,21 @@ EPUBCheck를 실행합니다. `--keep-going`이 없으면 첫 실패가 관찰�
 ## 로컬 웹사전 구조
 
 저장소·바이너리·외부 로컬 자산 경계는
-[`ADR-0009`](decisions/0009-local-web-app-boundary.md)를 따릅니다.
+[`ADR-0009`](decisions/0009-local-web-app-boundary.md)를, schema와 migration은
+[`ADR-0010`](decisions/0010-sqlite-schema-v1.md)을 따릅니다.
+
+schema v1은 bundled SQLite를 사용하며 모든 application table을
+`STRICT, WITHOUT ROWID`로 생성합니다. metadata·migration, corpus·source file,
+canonical entity, lossless source record·attribute, 조회 projection, relation·raw
+field·candidate를 분리합니다. native key는 `TEXT`로 보존하고 canonical ID와
+원본 순서는 명시적 column·key로 저장하므로 `rowid`에 의존하지 않습니다.
+
+내장 migration은 SQL checksum과 `PRAGMA user_version`을 함께 기록하고
+`BEGIN IMMEDIATE` transaction으로 적용합니다. `web_db::validate`는 URI 해석
+없는 read-only 연결에서 application ID, migration history, schema fingerprint,
+`quick_check`와 foreign key를 확인합니다. `ReadyCorpus`는 단일 ready corpus와
+source commit·필수 metadata·entity owner·대표 entry projection을 추가로
+검사하며, 선택 파일을 복사하거나 migration하지 않습니다.
 
 - 저장소는 하나로 유지하고 EPUB 변환 CLI와 로컬 웹사전 앱을 별도 Rust
   바이너리로 만듭니다.

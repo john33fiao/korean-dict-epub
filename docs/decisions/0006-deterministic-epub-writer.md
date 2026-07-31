@@ -21,7 +21,7 @@ ZIP metadata 때문에 같은 입력의 결과가 매번 달라져서는 안 됩
   1MiB 중 먼저 도달한 경계에서 chapter를 나눕니다. 한 항목 내부는 나누지
   않습니다.
 - OPF manifest/spine, nav와 ZIP member는 같은 chapter 목록에서 만듭니다.
-- ZIP은 MSRV 1.85보다 낮은 MSRV 1.83을 지원하는 `zip` 7.0.0을 정확히
+- ZIP은 현재 프로젝트 MSRV보다 낮은 Rust 1.83을 지원하는 `zip` 7.0.0을 정확히
   고정해 사용합니다. `mimetype`은 첫 member이자 무압축이며 나머지는
   고정 level의 deflate를 사용합니다.
 - ZIP timestamp와 OPF 수정 시각은 `1980-01-01T00:00:00Z`로 고정합니다.

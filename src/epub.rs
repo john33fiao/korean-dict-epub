@@ -535,12 +535,11 @@ fn extract_headword(dictionary: Dictionary, records: &[SourceRecord], index: u64
                 } if local_name(name) == "feat" => attributes,
                 _ => continue,
             };
-            if attribute_value(attributes, "att") == Some("writtenForm") {
-                if let Some(value) = attribute_value(attributes, "val") {
-                    if !value.trim().is_empty() {
-                        return value.trim().to_owned();
-                    }
-                }
+            if attribute_value(attributes, "att") == Some("writtenForm")
+                && let Some(value) = attribute_value(attributes, "val")
+                && !value.trim().is_empty()
+            {
+                return value.trim().to_owned();
             }
         }
     } else {
