@@ -26,27 +26,26 @@ fn all_dictionary_shapes_have_stable_lossless_records() {
     let krdict = digest_fixture("krdict.xml");
     let stdict = digest_fixture("stdict.xml");
     let opendict = digest_fixture("opendict.xml");
-
     assert_eq!(
         krdict.sha256,
-        "3109b4aa9586f7f0721524a5df39fc79d6d73a1311020be75be424a07c4f7c1a"
+        "fc6bcadce3eb784cab537d0203ed81101a479fe9f368648b975e1d72eee2f719"
     );
     assert_eq!(
         stdict.sha256,
-        "02f8bbe17de635c919259b7b6c4ae9c3c316ee4708a2f1d3e5feed130ad694ed"
+        "e3190ec6c461eacec04dc21d6acb0535a98abbffbc5871bb75e90e9b20d6ae35"
     );
     assert_eq!(
         opendict.sha256,
-        "33adec182af2e8f438fefe8b247d6d86a5e2630feac5d8262b398e2e26535068"
+        "eb330a77a1f1a14504536ec1b8ea72c3d246eb7196f5d42ebb9baecbf9375b35"
     );
-    assert_eq!(krdict.counts.elements, 6);
-    assert_eq!(krdict.counts.empty_elements, 1);
-    assert_eq!(krdict.counts.attributes, 8);
-    assert_eq!(stdict.counts.elements, 7);
+    assert_eq!(krdict.counts.elements, 11);
+    assert_eq!(krdict.counts.empty_elements, 4);
+    assert_eq!(krdict.counts.attributes, 16);
+    assert_eq!(stdict.counts.elements, 12);
     assert_eq!(stdict.counts.tail_texts, 1);
-    assert_eq!(opendict.counts.elements, 6);
+    assert_eq!(opendict.counts.elements, 12);
     assert_eq!(opendict.counts.empty_elements, 1);
-    assert_eq!(opendict.counts.element_texts, 2);
+    assert_eq!(opendict.counts.element_texts, 6);
 }
 
 #[test]

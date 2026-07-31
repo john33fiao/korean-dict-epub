@@ -1,10 +1,11 @@
-use std::fs;
+use std::fs::{self, File};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use korean_dict_epub::catalog::Dictionary;
 use korean_dict_epub::record::{CanonicalDigest, SourceAttribute, SourceRecord};
+use korean_dict_epub::source::SourceRecordReader;
 use korean_dict_epub::web_db::{ValidationLevel, validate};
 use korean_dict_epub::web_import::{
     ExpectedCorpus, FileTransactionOutcome, ImportError, ImportMode, SourceFileCompletion,
@@ -346,6 +347,202 @@ fn rebuild_rejects_sidecars_at_start_and_before_publish() {
     assert_eq!(fs::read(&sidecar).unwrap(), b"appeared-late");
 }
 
+#[test]
+fn streams_three_dictionary_fixtures_into_one_ready_mini_corpus() {
+    let fixture = TempRoot::new("three-dictionary-mini-corpus");
+    let database = fixture.database();
+    let source_root = fixture.path.join("source");
+    let specs = [
+        (Dictionary::Krdict, "krdict.xml", "krdict/fixture.xml"),
+        (Dictionary::Stdict, "stdict.xml", "stdict/fixture.xml"),
+        (Dictionary::Opendict, "opendict.xml", "opendict/fixture.xml"),
+    ];
+    let mut identities = Vec::new();
+    let mut source_paths = Vec::new();
+    for (source_ordinal, (dictionary, fixture_name, relative_path)) in specs.into_iter().enumerate()
+    {
+        let source_path = source_root.join(dictionary.key()).join("fixture.xml");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        let mut bytes = fs::read(source_fixture(fixture_name)).unwrap();
+        if dictionary == Dictionary::Krdict {
+            bytes = replace_bytes(&bytes, b"CONTROL_BYTE", &[0x08]);
+        }
+        fs::write(&source_path, bytes).unwrap();
+        identities.push(SourceFileIdentity {
+            relative_path: PathBuf::from(relative_path),
+            dictionary,
+            source_ordinal: u64::try_from(source_ordinal).unwrap(),
+            volume_number: 1,
+            volume_total: 1,
+        });
+        source_paths.push(source_path);
+    }
+
+    let mut session = begin_import(&database, COMMIT, ImportMode::New).unwrap();
+    for (identity, source_path) in identities.iter().zip(&source_paths) {
+        let outcome = session
+            .import_source_file(identity, source_path)
+            .expect("fixture import should commit");
+        assert!(matches!(outcome, FileTransactionOutcome::Committed(_)));
+    }
+    let descriptor = session
+        .finalize(&ExpectedCorpus {
+            source_commit: COMMIT.to_owned(),
+            source_files: identities.clone(),
+        })
+        .unwrap();
+    let corpus = descriptor.corpus.unwrap();
+    assert_eq!((corpus.source_file_count, corpus.entry_count), (3, 6));
+    validate(&database, ValidationLevel::ReadyCorpus).unwrap();
+
+    let connection = Connection::open(&database).unwrap();
+    for (identity, source_path) in identities.iter().zip(&source_paths) {
+        let expected = source_digest(source_path);
+        let actual: (String, i64, i64) = connection
+            .query_row(
+                "SELECT record_sha256, record_count, entry_count FROM source_file \
+                 WHERE corpus_id = ?1 AND relative_path = ?2",
+                params![COMMIT, identity.relative_path.to_string_lossy()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(actual.0, expected.0);
+        assert_eq!(u64::try_from(actual.1).unwrap(), expected.1);
+        assert_eq!(actual.2, 2);
+    }
+
+    let entries = connection
+        .prepare(
+            "SELECT entity.canonical_id, entity.native_key, entry_projection.headword, \
+                    entry_projection.homonym_number, entity.entry_ordinal, \
+                    entry_projection.headword_record_ordinal \
+             FROM source_file \
+             JOIN entity ON entity.corpus_id = source_file.corpus_id \
+                        AND entity.relative_path = source_file.relative_path \
+             JOIN entry_projection ON entry_projection.entry_id = entity.canonical_id \
+             WHERE entity.entity_kind = 'entry' \
+             ORDER BY source_file.source_ordinal, entity.entry_ordinal",
+        )
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| (&entry.1, &entry.2, entry.3.as_deref(), entry.4))
+            .collect::<Vec<_>>(),
+        vec![
+            (&"0001".to_owned(), &"ᄔᅡ라".to_owned(), Some("1"), 1),
+            (&"0002".to_owned(), &"가상 표제어".to_owned(), Some("2"), 2),
+            (&"0010".to_owned(), &"가상 표제어".to_owned(), None, 1),
+            (&"0020".to_owned(), &"두 번째 표제어".to_owned(), None, 2),
+            (&"0100".to_owned(), &"합성 표제어".to_owned(), Some("1"), 1),
+            (
+                &"0200".to_owned(),
+                &"두 번째 열린 표제어".to_owned(),
+                Some("2"),
+                2
+            ),
+        ]
+    );
+    assert!(entries.iter().all(|entry| entry.5.is_some()));
+    assert_eq!(entries[0].0, format!("kweb:v1/{COMMIT}/krdict/entry/0001"));
+
+    let opaque_attributes = connection
+        .prepare(
+            "SELECT source_attribute.qname FROM source_record \
+             JOIN source_attribute USING(corpus_id, relative_path, record_ordinal) \
+             WHERE source_record.qname = 'future:opaque' \
+             ORDER BY source_attribute.attribute_ordinal",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(opaque_attributes, ["zeta", "alpha"]);
+    let text_values = connection
+        .prepare("SELECT text_value FROM source_record WHERE text_value IS NOT NULL")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(text_values.iter().any(|value| value.contains('\u{0008}')));
+    assert!(text_values.iter().any(|value| value == "仮の見出し語"));
+    assert!(text_values.iter().any(|value| value == "뒤"));
+    let long_url: String = connection
+        .query_row(
+            "SELECT attribute_value FROM source_attribute WHERE qname = 'url'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(long_url.starts_with("https://example.invalid/"));
+}
+
+#[test]
+fn rejects_invalid_entry_shapes_and_rolls_back_the_file() {
+    let cases = [
+        (
+            "missing-key",
+            "<LexicalResource><LexicalEntry><Lemma><feat att=\"writtenForm\" val=\"표제어\"/></Lemma></LexicalEntry></LexicalResource>",
+        ),
+        (
+            "empty-headword",
+            "<LexicalResource><LexicalEntry id=\"1\"><Lemma><feat att=\"writtenForm\" val=\" \"/></Lemma></LexicalEntry></LexicalResource>",
+        ),
+        (
+            "duplicate-key",
+            "<LexicalResource><LexicalEntry id=\"1\"><Lemma><feat att=\"writtenForm\" val=\"하나\"/></Lemma></LexicalEntry><LexicalEntry id=\"1\"><Lemma><feat att=\"writtenForm\" val=\"둘\"/></Lemma></LexicalEntry></LexicalResource>",
+        ),
+        (
+            "nested-entry",
+            "<LexicalResource><LexicalEntry id=\"1\"><LexicalEntry id=\"2\"/></LexicalEntry></LexicalResource>",
+        ),
+        (
+            "malformed",
+            "<LexicalResource><LexicalEntry id=\"1\"><Lemma></LexicalResource>",
+        ),
+    ];
+    for (label, xml) in cases {
+        let fixture = TempRoot::new(label);
+        let database = fixture.database();
+        let source = fixture.path.join("source.xml");
+        fs::write(&source, xml).unwrap();
+        let identity = source_file(0, "krdict/fixture.xml");
+        let mut session = begin_import(&database, COMMIT, ImportMode::New).unwrap();
+        assert!(
+            session.import_source_file(&identity, &source).is_err(),
+            "{label} should fail"
+        );
+        drop(session);
+        let connection = Connection::open(&database).unwrap();
+        let counts: (i64, i64, i64) = connection
+            .query_row(
+                "SELECT \
+                     (SELECT count(*) FROM source_file), \
+                     (SELECT count(*) FROM source_record), \
+                     (SELECT count(*) FROM entity)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (0, 0, 0), "{label} must roll back");
+    }
+}
+
 fn source_file(source_ordinal: u64, relative_path: &str) -> SourceFileIdentity {
     SourceFileIdentity {
         relative_path: PathBuf::from(relative_path),
@@ -354,6 +551,34 @@ fn source_file(source_ordinal: u64, relative_path: &str) -> SourceFileIdentity {
         volume_number: source_ordinal + 1,
         volume_total: 3,
     }
+}
+
+fn source_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/source")
+        .join(name)
+}
+
+fn source_digest(path: &Path) -> (String, u64) {
+    let mut digest = CanonicalDigest::new();
+    let mut count = 0;
+    for record in SourceRecordReader::new(File::open(path).unwrap()) {
+        digest.update(&record.unwrap());
+        count += 1;
+    }
+    (digest.finalize().sha256, count)
+}
+
+fn replace_bytes(input: &[u8], needle: &[u8], replacement: &[u8]) -> Vec<u8> {
+    let offset = input
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .expect("fixture marker should exist");
+    let mut output = Vec::with_capacity(input.len() - needle.len() + replacement.len());
+    output.extend_from_slice(&input[..offset]);
+    output.extend_from_slice(replacement);
+    output.extend_from_slice(&input[offset + needle.len()..]);
+    output
 }
 
 fn completion() -> SourceFileCompletion {

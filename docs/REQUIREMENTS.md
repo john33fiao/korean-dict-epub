@@ -109,6 +109,10 @@
 - 파일 하나의 적재는 하나의 transaction으로 확정합니다. corpus의 `ready`
   상태와 최종 count는 schema·catalog·digest/count·무결성·대표 조회 검증을
   수행하는 같은 transaction 안에서만 commit합니다.
+- 단일 XML 적재는 `SourceRecord`를 순서대로 SQLite에 기록하며, 항목 경계에서
+  native key·표제어·동형어 번호의 최소 projection만 분리합니다. projection
+  추출 성공 여부가 원문 요소·속성·text/tail·빈 요소의 포함 여부를 바꾸지
+  않습니다.
 - importer는 웹앱의 machine-local active DB 설정을 읽거나 변경하지 않습니다.
 - 선택한 DB는 앱 내부로 복사하지 않고 원래 로컬 경로에서 사용합니다. 선택·
   검증이나 적용이 실패하면 기존 활성 DB를 유지합니다.

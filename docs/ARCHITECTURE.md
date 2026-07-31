@@ -16,8 +16,9 @@
 
 웹사전은 같은 저장소의 후속 제품 트랙입니다. 기존 EPUB CLI와 실행
 바이너리를 분리하고, 공통 XML 입력·보존·감사 코드는 저장소 안에서
-공유합니다. KWEB-003의 SQLite schema·migration·read-only 검증 API와
-KWEB-004A의 importer 수명주기 API가 구현됐습니다. 실제 XML 적재, 실행
+공유합니다. KWEB-003의 SQLite schema·migration·read-only 검증 API,
+KWEB-004A의 importer 수명주기 API와 KWEB-004B의 세 사전 fixture용 단일 XML
+streaming importer가 구현됐습니다. 대표 실데이터 권과 124권 적재, 실행
 바이너리와 브라우저 QA는 아직 시작하지 않았습니다.
 
 ## 목표 흐름
@@ -220,6 +221,14 @@ SQLite 무결성·foreign key와 ready reference/projection을 한 transaction�
 검사합니다. `state='ready'`와 최종 count를 기록한 뒤 같은 transaction에서
 `ReadyCorpus` 검증까지 성공해야 commit하므로, 검증 실패나 강제 종료가
 외부에서 관찰 가능한 잘못된 ready DB를 남기지 않습니다.
+
+단일 파일 importer는 `SourceRecordReader`가 내보내는 record와 원래 순서의
+속성을 즉시 INSERT하여 XML 전체를 모으지 않습니다. 항목 시작 ordinal과
+사전별 native key·표제어·동형어 번호만 유지하고 항목 종료 시 canonical entry와
+`entry_projection`을 만든 뒤 해당 record 범위에 entry ID를 연결합니다. 현재
+자동 검증 범위는 native key가 사전 namespace 안에서 고유한 세 fixture이며,
+전체 코퍼스 중복 key disambiguation과 relation·전체 text projection은 후속
+적재 단계에서 다룹니다.
 
 - 저장소는 하나로 유지하고 EPUB 변환 CLI와 로컬 웹사전 앱을 별도 Rust
   바이너리로 만듭니다.

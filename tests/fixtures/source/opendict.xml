@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <channel>
-  <item target_code="o-001">
+  <item>
+    <target_code>0100</target_code>
+    <group_order>1</group_order>
     <wordInfo>
       <word>합성 표제어</word>
       <media url="https://example.invalid/a/very/long/path?query=value"/>
     </wordInfo>
     <translation language="English"><![CDATA[synthetic & readable]]></translation>
+  </item>
+  <item target_code="0200">
+    <group_order>2</group_order>
+    <wordInfo>
+      <word>두 번째 열린 표제어</word>
+    </wordInfo>
   </item>
 </channel>
