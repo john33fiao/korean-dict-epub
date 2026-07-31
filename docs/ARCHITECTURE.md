@@ -12,6 +12,10 @@
 - `references/korean-dict-nikl`은 읽기 전용 입력으로 취급할 Git 서브모듈입니다.
 - 생성 EPUB과 보고서는 로컬 산출물이며 Git 추적 대상이 아닙니다.
 
+웹사전은 같은 저장소의 후속 제품 트랙입니다. 기존 EPUB CLI와 실행
+바이너리를 분리하고, 공통 XML 입력·보존·감사 코드는 저장소 안에서
+공유합니다. 웹사전 구현과 브라우저 QA는 아직 시작하지 않았습니다.
+
 ## 목표 흐름
 
 ```text
@@ -174,11 +178,37 @@ EPUBCheck를 실행합니다. `--keep-going`이 없으면 첫 실패가 관찰�
 - 도구 릴리스와 전체 코퍼스 검증, 기기 QA, 생성 콘텐츠 배포는 서로 다른
   상태입니다. 생성 콘텐츠 배포는 이 프로젝트의 범위가 아닙니다.
 
+## 로컬 웹사전 구조
+
+저장소·바이너리·외부 로컬 자산 경계는
+[`ADR-0009`](decisions/0009-local-web-app-boundary.md)를 따릅니다.
+
+- 저장소는 하나로 유지하고 EPUB 변환 CLI와 로컬 웹사전 앱을 별도 Rust
+  바이너리로 만듭니다.
+- 웹사전 앱은 loopback HTTP server를 시작하고 바이너리에 내장된
+  HTML·CSS·JavaScript·아이콘·글꼴을 제공합니다.
+- importer가 생성한 SQLite corpus DB는 바이너리 밖의 로컬 파일입니다.
+  웹사전 설정의 native file picker로 기존 파일을 선택하고, backend가
+  SQLite 형식, schema version, 필수 metadata와 대표 조회를 검증한 뒤
+  machine-local active DB 설정을 원자적으로 바꿉니다.
+- DB 파일은 앱 전용 위치로 복사하지 않고 선택한 원래 경로에서 직접 엽니다.
+  파일이 없거나 검증·적용이 실패하면 기존 active DB를 유지하고 조치 가능한
+  오류를 표시합니다.
+- KURE model과 `llama.cpp` runtime도 외부 로컬 자산이며 사용자의 PC 또는
+  Mac에 이미 준비돼 있다고 가정합니다. 앱은 설치·다운로드·업데이트하지
+  않습니다. vector index는 외부의 재생성 가능한 로컬 파생 파일입니다.
+- DB 선택과 model/runtime 선택은 같은 설정 영역에서 제공할 수 있지만
+  active 상태와 변경 수명주기는 분리합니다. model/runtime은 후보 검증,
+  적용과 명시적 재색인을 서로 다른 동작으로 유지합니다.
+- 웹사전의 network listener는 loopback에만 bind하며 공개 호스팅과 외부
+  network service는 초기 구조에 포함하지 않습니다.
+
 ## 공개와 로컬 전용 경계
 
 공개 추적 대상:
 
 - 변환기와 테스트
+- 로컬 웹사전 코드와 테스트
 - Python 기준선
 - README와 공개 요구사항·아키텍처·기술 결정
 - `.gitmodules`와 서브모듈 gitlink
