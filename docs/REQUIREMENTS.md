@@ -102,6 +102,14 @@
   웹사전의 별도 설정 화면에서 기존 DB 파일을 선택하고, 앱은 SQLite 형식,
   지원 schema·migration version, 필수 metadata와 대표 조회를 검증한 뒤에만
   활성 DB로 적용합니다.
+- importer의 `new`는 기존 DB나 SQLite sidecar가 있으면 거부하고, `resume`은
+  동일 source commit·schema v1·`importing` 상태만 허용합니다. `rebuild`는
+  명시적으로 선택한 경우에만 같은 디렉터리의 새 staging DB를 완성·검증한 뒤
+  기존 경로를 원자적으로 교체합니다.
+- 파일 하나의 적재는 하나의 transaction으로 확정합니다. corpus의 `ready`
+  상태와 최종 count는 schema·catalog·digest/count·무결성·대표 조회 검증을
+  수행하는 같은 transaction 안에서만 commit합니다.
+- importer는 웹앱의 machine-local active DB 설정을 읽거나 변경하지 않습니다.
 - 선택한 DB는 앱 내부로 복사하지 않고 원래 로컬 경로에서 사용합니다. 선택·
   검증이나 적용이 실패하면 기존 활성 DB를 유지합니다.
 - schema v1은 bundled SQLite의 `STRICT, WITHOUT ROWID` table을 사용합니다.

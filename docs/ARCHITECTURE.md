@@ -16,9 +16,9 @@
 
 웹사전은 같은 저장소의 후속 제품 트랙입니다. 기존 EPUB CLI와 실행
 바이너리를 분리하고, 공통 XML 입력·보존·감사 코드는 저장소 안에서
-공유합니다. KWEB-003의 SQLite schema·migration·read-only 검증 API가
-구현됐으며 XML importer, 실행 바이너리와 브라우저 QA는 아직 시작하지
-않았습니다.
+공유합니다. KWEB-003의 SQLite schema·migration·read-only 검증 API와
+KWEB-004A의 importer 수명주기 API가 구현됐습니다. 실제 XML 적재, 실행
+바이너리와 브라우저 QA는 아직 시작하지 않았습니다.
 
 ## 목표 흐름
 
@@ -145,6 +145,7 @@ check별 expected/actual 값과 재현 명령을 담고 같은 출력 디렉터�
 | `web_identity` | KWEB canonical entity·relation enum과 `kweb:v1/...` ID 생성 |
 | `web_source_audit` | 전체 XML entity·관계 조사와 KWEB-002 보고서 |
 | `web_db` | SQLite schema v1 생성·forward migration·read-only 검증 |
+| `web_import` | KWEB importer new·resume·rebuild와 파일 transaction 수명주기 |
 
 다음 이름은 이후 구현 방향이며 현재 파일이 존재한다는 뜻이 아닙니다.
 
@@ -203,6 +204,22 @@ field·candidate를 분리합니다. native key는 `TEXT`로 보존하고 canoni
 `quick_check`와 foreign key를 확인합니다. `ReadyCorpus`는 단일 ready corpus와
 source commit·필수 metadata·entity owner·대표 entry projection을 추가로
 검사하며, 선택 파일을 복사하거나 migration하지 않습니다.
+
+KWEB importer 수명주기는 DB 생성과 웹앱 설정 적용을 분리합니다. `new`는 대상
+DB와 `-journal`·`-wal`·`-shm` sidecar가 모두 없을 때만 시작하고, `resume`은
+migration 없이 정확한 schema v1·동일 source commit·단일 `importing` corpus와
+완결된 파일 transaction만 이어받습니다. `rebuild`는 기존 경로 옆의 고유한
+staging DB를 완성해 `ReadyCorpus`로 검증한 뒤 bounded-memory atomic publish로
+교체하며, 대상 sidecar가 있거나 준비·검증·publish가 실패하면 기존 DB를
+유지합니다.
+
+각 source file row와 그 파일의 lossless record·entity·projection은 하나의
+`BEGIN IMMEDIATE` transaction에서 함께 확정됩니다. 최종화 API도 importing
+identity, 기대 catalog, 파일별 digest/count와 실제 row count, schema fingerprint,
+SQLite 무결성·foreign key와 ready reference/projection을 한 transaction에서
+검사합니다. `state='ready'`와 최종 count를 기록한 뒤 같은 transaction에서
+`ReadyCorpus` 검증까지 성공해야 commit하므로, 검증 실패나 강제 종료가
+외부에서 관찰 가능한 잘못된 ready DB를 남기지 않습니다.
 
 - 저장소는 하나로 유지하고 EPUB 변환 CLI와 로컬 웹사전 앱을 별도 Rust
   바이너리로 만듭니다.

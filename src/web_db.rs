@@ -10,7 +10,8 @@ use rusqlite::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::record::DIGEST_SCHEMA;
+use crate::catalog::Dictionary;
+use crate::record::{CanonicalDigest, DIGEST_SCHEMA, SourceAttribute, SourceRecord};
 pub use crate::web_identity::CANONICAL_ID_SCHEMA;
 
 pub const APPLICATION_ID: i32 = 0x4B57_4542;
@@ -63,6 +64,28 @@ pub struct CorpusDescriptor {
     pub entry_count: u64,
     pub representative_entry_id: String,
     pub representative_headword: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFileIdentity {
+    pub relative_path: PathBuf,
+    pub dictionary: Dictionary,
+    pub source_ordinal: u64,
+    pub volume_number: u64,
+    pub volume_total: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFileCompletion {
+    pub record_sha256: String,
+    pub record_count: u64,
+    pub entry_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedCorpus {
+    pub source_commit: String,
+    pub source_files: Vec<SourceFileIdentity>,
 }
 
 #[derive(Debug)]
@@ -237,6 +260,127 @@ pub fn validate(path: &Path, level: ValidationLevel) -> Result<DatabaseDescripto
     .map_err(|source| sqlite_error(&path, source))?;
     configure_connection(&connection, &path)?;
     validate_connection(&connection, &path, level)
+}
+
+pub fn finalize_import(
+    connection: &mut Connection,
+    path: &Path,
+    expected: &ExpectedCorpus,
+) -> Result<DatabaseDescriptor, WebDbError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|source| sqlite_error(path, source))?;
+    validate_connection(&transaction, path, ValidationLevel::SchemaOnly)?;
+    validate_importing_corpus(&transaction, path, &expected.source_commit, false)?;
+    let entry_count = validate_expected_source_files(&transaction, path, expected)?;
+
+    transaction
+        .execute(
+            "UPDATE corpus \
+             SET state = 'ready', source_file_count = ?1, entry_count = ?2 \
+             WHERE corpus_id = ?3 AND source_commit = ?3 AND state = 'importing'",
+            params![
+                to_i64(expected.source_files.len(), path, "source file count")?,
+                to_i64_u64(entry_count, path, "entry count")?,
+                expected.source_commit
+            ],
+        )
+        .map_err(|source| sqlite_error(path, source))?;
+
+    let descriptor = validate_connection(&transaction, path, ValidationLevel::ReadyCorpus)?;
+    transaction
+        .commit()
+        .map_err(|source| sqlite_error(path, source))?;
+    Ok(descriptor)
+}
+
+pub(crate) fn open_existing_for_import(path: &Path) -> Result<(PathBuf, Connection), WebDbError> {
+    let path = resolve_existing_path(path)?;
+    let connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|source| sqlite_error(&path, source))?;
+    configure_connection(&connection, &path)?;
+    validate_connection(&connection, &path, ValidationLevel::SchemaOnly)?;
+    Ok((path, connection))
+}
+
+pub(crate) fn initialize_importing_corpus(
+    connection: &mut Connection,
+    path: &Path,
+    source_commit: &str,
+) -> Result<(), WebDbError> {
+    if !is_lower_hex_commit(source_commit) {
+        return invalid_database(
+            path,
+            "source commit must be 40 lowercase hexadecimal characters".to_owned(),
+        );
+    }
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|source| sqlite_error(path, source))?;
+    transaction
+        .execute(
+            "INSERT INTO corpus(corpus_id, source_commit, state) VALUES (?1, ?1, 'importing')",
+            params![source_commit],
+        )
+        .map_err(|source| sqlite_error(path, source))?;
+    transaction
+        .commit()
+        .map_err(|source| sqlite_error(path, source))
+}
+
+pub(crate) fn validate_importing_corpus(
+    connection: &Connection,
+    path: &Path,
+    source_commit: &str,
+    require_complete_files: bool,
+) -> Result<(), WebDbError> {
+    let rows = connection
+        .query_row(
+            "SELECT count(*), \
+                    coalesce(min(corpus_id), ''), coalesce(min(source_commit), ''), \
+                    coalesce(min(state), '') \
+             FROM corpus",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .map_err(|source| sqlite_error(path, source))?;
+    if rows.0 != 1 || rows.1 != source_commit || rows.2 != source_commit || rows.3 != "importing" {
+        return invalid_database(
+            path,
+            format!(
+                "resume/finalization requires one importing corpus for source commit {source_commit}"
+            ),
+        );
+    }
+    if require_complete_files {
+        let incomplete: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM source_file \
+                 WHERE record_sha256 IS NULL OR record_count IS NULL OR entry_count IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|source| sqlite_error(path, source))?;
+        if incomplete != 0 {
+            return invalid_database(
+                path,
+                format!("importing corpus has {incomplete} incomplete source files"),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn configure_connection(connection: &Connection, path: &Path) -> Result<(), WebDbError> {
@@ -609,6 +753,347 @@ fn validate_ready_corpus(
     })
 }
 
+fn validate_expected_source_files(
+    connection: &Connection,
+    path: &Path,
+    expected: &ExpectedCorpus,
+) -> Result<u64, WebDbError> {
+    if !is_lower_hex_commit(&expected.source_commit) {
+        return invalid_database(
+            path,
+            "expected source commit must be 40 lowercase hexadecimal characters".to_owned(),
+        );
+    }
+
+    let mut statement = connection
+        .prepare(
+            "SELECT relative_path, dictionary, source_ordinal, volume_number, volume_total, \
+                    record_sha256, record_count, entry_count \
+             FROM source_file WHERE corpus_id = ?1 ORDER BY source_ordinal",
+        )
+        .map_err(|source| sqlite_error(path, source))?;
+    let stored = statement
+        .query_map(params![expected.source_commit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+            ))
+        })
+        .map_err(|source| sqlite_error(path, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| sqlite_error(path, source))?;
+
+    if stored.len() != expected.source_files.len() {
+        return invalid_database(
+            path,
+            format!(
+                "source file set differs: found {}, expected {}",
+                stored.len(),
+                expected.source_files.len()
+            ),
+        );
+    }
+
+    let mut total_entries = 0_u64;
+    for (index, (actual, wanted)) in stored.iter().zip(&expected.source_files).enumerate() {
+        let relative_path = normalized_relative_path(&wanted.relative_path, path)?;
+        let expected_ordinal = u64::try_from(index).expect("source file indexes fit in u64");
+        if wanted.source_ordinal != expected_ordinal
+            || actual.0 != relative_path
+            || actual.1 != wanted.dictionary.key()
+            || actual.2 != to_i64_u64(wanted.source_ordinal, path, "source ordinal")?
+            || actual.3 != to_i64_u64(wanted.volume_number, path, "volume number")?
+            || actual.4 != to_i64_u64(wanted.volume_total, path, "volume total")?
+        {
+            return invalid_database(
+                path,
+                format!("source file identity/order differs at ordinal {index}"),
+            );
+        }
+
+        let digest = actual
+            .5
+            .as_deref()
+            .filter(|value| is_lower_hex_digest(value));
+        let record_count = actual.6.and_then(|value| u64::try_from(value).ok());
+        let entry_count = actual.7.and_then(|value| u64::try_from(value).ok());
+        let (Some(_), Some(record_count), Some(entry_count)) = (digest, record_count, entry_count)
+        else {
+            return invalid_database(
+                path,
+                format!("source file {relative_path} has incomplete metrics"),
+            );
+        };
+
+        validate_source_file_completion(
+            connection,
+            path,
+            &expected.source_commit,
+            &relative_path,
+            &SourceFileCompletion {
+                record_sha256: digest.expect("validated digest is present").to_owned(),
+                record_count,
+                entry_count,
+            },
+        )?;
+        total_entries =
+            total_entries
+                .checked_add(entry_count)
+                .ok_or_else(|| WebDbError::InvalidDatabase {
+                    path: path.to_path_buf(),
+                    reason: "entry count overflow".to_owned(),
+                })?;
+    }
+    Ok(total_entries)
+}
+
+pub(crate) fn validate_source_file_completion(
+    connection: &Connection,
+    path: &Path,
+    source_commit: &str,
+    relative_path: &str,
+    completion: &SourceFileCompletion,
+) -> Result<(), WebDbError> {
+    if !is_lower_hex_digest(&completion.record_sha256) {
+        return invalid_database(path, "source file digest is invalid".to_owned());
+    }
+    let actual_records = count_file_rows(
+        connection,
+        path,
+        "SELECT count(*) FROM source_record WHERE corpus_id = ?1 AND relative_path = ?2",
+        source_commit,
+        relative_path,
+    )?;
+    let actual_entries = count_file_rows(
+        connection,
+        path,
+        "SELECT count(*) FROM entity \
+         WHERE corpus_id = ?1 AND relative_path = ?2 AND entity_kind = 'entry'",
+        source_commit,
+        relative_path,
+    )?;
+    if actual_records != completion.record_count || actual_entries != completion.entry_count {
+        return invalid_database(
+            path,
+            format!("source file {relative_path} row counts differ from its metrics"),
+        );
+    }
+
+    let actual_digest = source_record_digest(connection, path, source_commit, relative_path)?;
+    if actual_digest != completion.record_sha256 {
+        return invalid_database(
+            path,
+            format!("source file {relative_path} record digest differs from its metadata"),
+        );
+    }
+    Ok(())
+}
+
+fn count_file_rows(
+    connection: &Connection,
+    path: &Path,
+    sql: &str,
+    source_commit: &str,
+    relative_path: &str,
+) -> Result<u64, WebDbError> {
+    let count: i64 = connection
+        .query_row(sql, params![source_commit, relative_path], |row| row.get(0))
+        .map_err(|source| sqlite_error(path, source))?;
+    u64::try_from(count).map_err(|_| WebDbError::InvalidDatabase {
+        path: path.to_path_buf(),
+        reason: "SQLite returned a negative source file row count".to_owned(),
+    })
+}
+
+struct StoredSourceRecord {
+    ordinal: u64,
+    kind: String,
+    depth: usize,
+    qname: Option<String>,
+    text_value: Option<String>,
+    attributes: Vec<SourceAttribute>,
+}
+
+fn source_record_digest(
+    connection: &Connection,
+    path: &Path,
+    source_commit: &str,
+    relative_path: &str,
+) -> Result<String, WebDbError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT record.record_ordinal, record.record_kind, record.depth, \
+                    record.qname, record.text_value, attribute.attribute_ordinal, \
+                    attribute.qname, attribute.attribute_value \
+             FROM source_record AS record \
+             LEFT JOIN source_attribute AS attribute \
+               ON attribute.corpus_id = record.corpus_id \
+              AND attribute.relative_path = record.relative_path \
+              AND attribute.record_ordinal = record.record_ordinal \
+             WHERE record.corpus_id = ?1 AND record.relative_path = ?2 \
+             ORDER BY record.record_ordinal, attribute.attribute_ordinal",
+        )
+        .map_err(|source| sqlite_error(path, source))?;
+    let mut rows = statement
+        .query(params![source_commit, relative_path])
+        .map_err(|source| sqlite_error(path, source))?;
+    let mut digest = CanonicalDigest::new();
+    let mut current: Option<StoredSourceRecord> = None;
+    let mut expected_ordinal = 0_u64;
+
+    while let Some(row) = rows.next().map_err(|source| sqlite_error(path, source))? {
+        let ordinal_i64: i64 = row.get(0).map_err(|source| sqlite_error(path, source))?;
+        let ordinal = u64::try_from(ordinal_i64).map_err(|_| WebDbError::InvalidDatabase {
+            path: path.to_path_buf(),
+            reason: "source record ordinal is negative".to_owned(),
+        })?;
+        if current
+            .as_ref()
+            .is_some_and(|record| record.ordinal != ordinal)
+        {
+            let record = current.take().expect("current source record is present");
+            if record.ordinal != expected_ordinal {
+                return invalid_database(
+                    path,
+                    format!("source record ordinal {} is not contiguous", record.ordinal),
+                );
+            }
+            update_source_digest(path, &mut digest, record)?;
+            expected_ordinal += 1;
+        }
+        if current.is_none() {
+            let depth_i64: i64 = row.get(2).map_err(|source| sqlite_error(path, source))?;
+            let depth = usize::try_from(depth_i64).map_err(|_| WebDbError::InvalidDatabase {
+                path: path.to_path_buf(),
+                reason: "source record depth is outside the supported range".to_owned(),
+            })?;
+            current = Some(StoredSourceRecord {
+                ordinal,
+                kind: row.get(1).map_err(|source| sqlite_error(path, source))?,
+                depth,
+                qname: row.get(3).map_err(|source| sqlite_error(path, source))?,
+                text_value: row.get(4).map_err(|source| sqlite_error(path, source))?,
+                attributes: Vec::new(),
+            });
+        }
+
+        let attribute_ordinal: Option<i64> =
+            row.get(5).map_err(|source| sqlite_error(path, source))?;
+        if let Some(attribute_ordinal) = attribute_ordinal {
+            let record = current.as_mut().expect("current source record is present");
+            let wanted = i64::try_from(record.attributes.len()).map_err(|_| {
+                WebDbError::InvalidDatabase {
+                    path: path.to_path_buf(),
+                    reason: "source attribute count exceeds SQLite INTEGER range".to_owned(),
+                }
+            })?;
+            if attribute_ordinal != wanted {
+                return invalid_database(
+                    path,
+                    format!("source attribute ordinal {attribute_ordinal} is not contiguous"),
+                );
+            }
+            record.attributes.push(SourceAttribute {
+                name: row.get(6).map_err(|source| sqlite_error(path, source))?,
+                value: row.get(7).map_err(|source| sqlite_error(path, source))?,
+            });
+        }
+    }
+
+    if let Some(record) = current {
+        if record.ordinal != expected_ordinal {
+            return invalid_database(
+                path,
+                format!("source record ordinal {} is not contiguous", record.ordinal),
+            );
+        }
+        update_source_digest(path, &mut digest, record)?;
+    }
+    Ok(digest.finalize().sha256)
+}
+
+fn update_source_digest(
+    path: &Path,
+    digest: &mut CanonicalDigest,
+    record: StoredSourceRecord,
+) -> Result<(), WebDbError> {
+    let source_record = match record.kind.as_str() {
+        "start_element" => SourceRecord::StartElement {
+            depth: record.depth,
+            name: required_qname(path, &record)?,
+            attributes: record.attributes,
+        },
+        "empty_element" => SourceRecord::EmptyElement {
+            depth: record.depth,
+            name: required_qname(path, &record)?,
+            attributes: record.attributes,
+        },
+        "element_text" => {
+            reject_attributes(path, &record)?;
+            SourceRecord::ElementText {
+                depth: record.depth,
+                value: required_text(path, &record)?,
+            }
+        }
+        "tail_text" => {
+            reject_attributes(path, &record)?;
+            SourceRecord::TailText {
+                depth: record.depth,
+                value: required_text(path, &record)?,
+            }
+        }
+        "end_element" => {
+            reject_attributes(path, &record)?;
+            SourceRecord::EndElement {
+                depth: record.depth,
+                name: required_qname(path, &record)?,
+            }
+        }
+        _ => {
+            return invalid_database(path, format!("unknown source record kind {}", record.kind));
+        }
+    };
+    digest.update(&source_record);
+    Ok(())
+}
+
+fn required_qname(path: &Path, record: &StoredSourceRecord) -> Result<String, WebDbError> {
+    record
+        .qname
+        .clone()
+        .ok_or_else(|| WebDbError::InvalidDatabase {
+            path: path.to_path_buf(),
+            reason: format!("source record {} has no QName", record.ordinal),
+        })
+}
+
+fn required_text(path: &Path, record: &StoredSourceRecord) -> Result<String, WebDbError> {
+    record
+        .text_value
+        .clone()
+        .ok_or_else(|| WebDbError::InvalidDatabase {
+            path: path.to_path_buf(),
+            reason: format!("source record {} has no text", record.ordinal),
+        })
+}
+
+fn reject_attributes(path: &Path, record: &StoredSourceRecord) -> Result<(), WebDbError> {
+    if record.attributes.is_empty() {
+        Ok(())
+    } else {
+        invalid_database(
+            path,
+            format!("source record {} cannot have attributes", record.ordinal),
+        )
+    }
+}
+
 fn verify_ready_references(
     connection: &Connection,
     path: &Path,
@@ -895,6 +1380,46 @@ fn is_lower_hex_commit(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn is_lower_hex_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn normalized_relative_path(path: &Path, database_path: &Path) -> Result<String, WebDbError> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return invalid_database(
+            database_path,
+            format!("unsafe source relative path '{}'", path.display()),
+        );
+    }
+    let value = path.to_str().ok_or_else(|| WebDbError::InvalidDatabase {
+        path: database_path.to_path_buf(),
+        reason: format!("source path '{}' is not UTF-8", path.display()),
+    })?;
+    Ok(value.replace('\\', "/"))
+}
+
+fn to_i64(value: usize, path: &Path, label: &str) -> Result<i64, WebDbError> {
+    i64::try_from(value).map_err(|_| WebDbError::InvalidDatabase {
+        path: path.to_path_buf(),
+        reason: format!("{label} exceeds SQLite INTEGER range"),
+    })
+}
+
+fn to_i64_u64(value: u64, path: &Path, label: &str) -> Result<i64, WebDbError> {
+    i64::try_from(value).map_err(|_| WebDbError::InvalidDatabase {
+        path: path.to_path_buf(),
+        reason: format!("{label} exceeds SQLite INTEGER range"),
+    })
 }
 
 fn resolve_new_path(path: &Path) -> Result<PathBuf, WebDbError> {
