@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel>
+  <item target_code="o-001">
+    <wordInfo>
+      <word>합성 표제어</word>
+      <media url="https://example.invalid/a/very/long/path?query=value"/>
+    </wordInfo>
+    <translation language="English"><![CDATA[synthetic & readable]]></translation>
+  </item>
+</channel>

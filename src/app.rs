@@ -2,9 +2,13 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
+use std::fs::File;
 use std::path::{Component, Path, PathBuf};
 
-use crate::cli::{Cli, Command, DictionarySelection, PreflightArgs};
+use crate::catalog::{self, CatalogError, Dictionary, Volume};
+use crate::cli::{Cli, Command, DictionarySelection, InspectArgs, PreflightArgs};
+use crate::record::{CanonicalDigest, DigestSummary, SourceRecord};
+use crate::source::{SourceError, SourceRecordReader};
 
 pub const RUNTIME_ERROR_EXIT_CODE: u8 = 3;
 
@@ -16,6 +20,67 @@ pub struct PreflightPlan {
     jobs: usize,
     overwrite: bool,
     keep_going: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectionReport {
+    dictionary: Dictionary,
+    volume: usize,
+    volumes: usize,
+    source: PathBuf,
+    entries: u64,
+    digest: DigestSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppOutput {
+    Preflight(PreflightPlan),
+    Inspection(InspectionReport),
+}
+
+impl fmt::Display for AppOutput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Preflight(plan) => plan.fmt(formatter),
+            Self::Inspection(report) => report.fmt(formatter),
+        }
+    }
+}
+
+impl fmt::Display for InspectionReport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(formatter, "status=inspected")?;
+        writeln!(formatter, "dictionary={}", self.dictionary.key())?;
+        writeln!(formatter, "volume={}", self.volume)?;
+        writeln!(formatter, "volumes={}", self.volumes)?;
+        writeln!(formatter, "source={}", self.source.display())?;
+        writeln!(formatter, "entries={}", self.entries)?;
+        writeln!(formatter, "record_schema={}", self.digest.schema)?;
+        writeln!(formatter, "record_sha256={}", self.digest.sha256)?;
+        writeln!(formatter, "elements={}", self.digest.counts.elements)?;
+        writeln!(
+            formatter,
+            "empty_elements={}",
+            self.digest.counts.empty_elements
+        )?;
+        writeln!(
+            formatter,
+            "end_elements={}",
+            self.digest.counts.end_elements
+        )?;
+        writeln!(formatter, "attributes={}", self.digest.counts.attributes)?;
+        writeln!(
+            formatter,
+            "element_texts={}",
+            self.digest.counts.element_texts
+        )?;
+        writeln!(formatter, "tail_texts={}", self.digest.counts.tail_texts)?;
+        write!(
+            formatter,
+            "control_characters={}",
+            self.digest.counts.control_characters
+        )
+    }
 }
 
 impl fmt::Display for PreflightPlan {
@@ -48,6 +113,16 @@ pub enum AppError {
         source: PathBuf,
         output: PathBuf,
     },
+    Catalog(CatalogError),
+    InvalidVolume {
+        dictionary: Dictionary,
+        requested: usize,
+        available: usize,
+    },
+    Source {
+        path: PathBuf,
+        error: SourceError,
+    },
 }
 
 impl AppError {
@@ -57,6 +132,9 @@ impl AppError {
             Self::MissingDictionaryDirectory { .. } => "KDEP-E002",
             Self::InvalidOutput { .. } => "KDEP-E003",
             Self::UnsafeOutput { .. } => "KDEP-E004",
+            Self::Catalog(_) => "KDEP-E005",
+            Self::InvalidVolume { .. } => "KDEP-E006",
+            Self::Source { .. } => "KDEP-E007",
         }
     }
 
@@ -97,15 +175,96 @@ impl fmt::Display for AppError {
                     source.display()
                 )
             }
+            Self::Catalog(error) => error.fmt(formatter),
+            Self::InvalidVolume {
+                dictionary,
+                requested,
+                available,
+            } => write!(
+                formatter,
+                "{} volume {requested} does not exist; available range is 1..={available}",
+                dictionary.key()
+            ),
+            Self::Source { path, error } => {
+                write!(formatter, "could not inspect '{}': {error}", path.display())
+            }
         }
     }
 }
 
-impl Error for AppError {}
+impl Error for AppError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Catalog(error) => Some(error),
+            Self::Source { error, .. } => Some(error),
+            Self::InvalidSource { .. }
+            | Self::MissingDictionaryDirectory { .. }
+            | Self::InvalidOutput { .. }
+            | Self::UnsafeOutput { .. }
+            | Self::InvalidVolume { .. } => None,
+        }
+    }
+}
 
-pub fn run(cli: Cli) -> Result<PreflightPlan, AppError> {
+pub fn run(cli: Cli) -> Result<AppOutput, AppError> {
     match cli.command {
-        Command::Preflight(args) => preflight(args),
+        Command::Preflight(args) => preflight(args).map(AppOutput::Preflight),
+        Command::Inspect(args) => inspect(args).map(AppOutput::Inspection),
+    }
+}
+
+fn inspect(args: InspectArgs) -> Result<InspectionReport, AppError> {
+    let source_root = resolve_source(&args.source)?;
+    let dictionary = args.dictionary.into();
+    validate_dictionary_directories(&source_root, dictionary_selection(dictionary))?;
+    let catalog = catalog::discover(&source_root, &[dictionary]).map_err(AppError::Catalog)?;
+    let requested = args.volume.get();
+    let volume = catalog.get(requested - 1).ok_or(AppError::InvalidVolume {
+        dictionary,
+        requested,
+        available: catalog.len(),
+    })?;
+    inspect_volume(volume)
+}
+
+fn inspect_volume(volume: &Volume) -> Result<InspectionReport, AppError> {
+    let file = File::open(&volume.source).map_err(|error| AppError::Source {
+        path: volume.source.clone(),
+        error: SourceError::Io(error),
+    })?;
+    let mut digest = CanonicalDigest::new();
+    let mut entries = 0_u64;
+    for record in SourceRecordReader::new(file) {
+        let record = record.map_err(|error| AppError::Source {
+            path: volume.source.clone(),
+            error,
+        })?;
+        if matches!(
+            &record,
+            SourceRecord::StartElement { name, .. }
+                | SourceRecord::EmptyElement { name, .. }
+                if volume.dictionary.is_entry_element(name)
+        ) {
+            entries += 1;
+        }
+        digest.update(&record);
+    }
+
+    Ok(InspectionReport {
+        dictionary: volume.dictionary,
+        volume: volume.number,
+        volumes: volume.total,
+        source: volume.relative_source.clone(),
+        entries,
+        digest: digest.finalize(),
+    })
+}
+
+const fn dictionary_selection(dictionary: Dictionary) -> DictionarySelection {
+    match dictionary {
+        Dictionary::Krdict => DictionarySelection::Krdict,
+        Dictionary::Stdict => DictionarySelection::Stdict,
+        Dictionary::Opendict => DictionarySelection::Opendict,
     }
 }
 

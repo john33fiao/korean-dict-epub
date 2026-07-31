@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel>
+  <item target_code="s-001">
+    <word_info>
+      <word>가상 표제어</word>
+      <translation language="日本語">仮の見出し語</translation>
+    </word_info>
+    <mixed>앞<empty/>뒤</mixed>
+  </item>
+</channel>

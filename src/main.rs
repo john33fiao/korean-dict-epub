@@ -7,8 +7,8 @@ use korean_dict_epub::cli::Cli;
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli) {
-        Ok(plan) => {
-            println!("{plan}");
+        Ok(output) => {
+            println!("{output}");
             ExitCode::SUCCESS
         }
         Err(error) => {

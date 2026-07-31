@@ -4,8 +4,10 @@
 
 - `prototype/python/`에는 전체 124권 생성과 검증에 사용한 Python 기준선이
   있습니다.
-- Rust 주 구현은 KDEP-001 CLI 기반까지 시작했습니다. 현재 `preflight`는
-  경로와 실행 정책만 점검하며 XML을 읽거나 EPUB을 만들지 않습니다.
+- Rust 주 구현은 KDEP-002의 catalog와 손실 없는 레코드 계층까지 자동
+  검증됐습니다. `preflight`는 경로와 실행 정책만 점검하고, `inspect`는
+  추적 XML 한 권을 읽어 항목 수와 digest를 출력합니다. EPUB은 만들지
+  않습니다.
 - `references/korean-dict-nikl`은 읽기 전용 입력으로 취급할 Git 서브모듈입니다.
 - 생성 EPUB과 보고서는 로컬 산출물이며 Git 추적 대상이 아닙니다.
 
@@ -32,6 +34,10 @@ references/korean-dict-nikl
 - upstream 저장소의 미추적 파일이나 생성물은 입력 목록에 포함하지 않습니다.
 - 입력 발견은 허용된 사전 디렉터리의 추적 XML만 대상으로 하고, 파일명 정렬을
   명시적으로 적용합니다.
+- 현재 catalog는 shell을 거치지 않고 `git ls-files -z`를 실행합니다. Git
+  전역 설정을 수정하지 않으며 현재 프로세스의 `safe.directory`만 canonical
+  입력 경로로 지정합니다. 결과 경로는 사전 디렉터리 바로 아래의 `.xml`
+  일반 파일인지 다시 검증하고 심볼릭 링크를 거부합니다.
 
 ### 보존 모델
 
@@ -44,6 +50,22 @@ Rust 구현의 중심 모델은 사전별 도메인 객체가 아니라 일반 X
 - 빈 요소
 - 의미 있는 tail 텍스트
 - 파서가 직접 수용할 수 없는 바이트의 역변환 가능한 대체 표현
+
+현재 `SourceRecord`는 시작 요소, 빈 요소, 요소 텍스트, tail 텍스트와 종료
+요소를 별도 variant로 표현합니다. 속성은 파서가 읽은 원래 순서를 유지하며,
+QName은 prefix를 포함한 입력 이름을 보존합니다. XML 1.0 금지 제어 바이트는
+파싱 전에 BMP PUA escape로 치환한 뒤 레코드 값에서 복원합니다. 실제 입력의
+escape 문자 자체는 두 번 기록해 제어문자 표식과 충돌하지 않게 합니다.
+
+canonical digest v1은 다음 순서로 SHA-256에 입력합니다.
+
+1. 고정 preamble `korean-dict-epub/source-record-digest/v1\0`
+2. variant별 1바이트 tag
+3. 깊이·문자열 길이·속성 수를 big-endian `u64`로 기록
+4. 이름과 값을 UTF-8 byte로 기록
+
+이 digest는 XML의 공백·인용부호 같은 lexical byte 동일성을 주장하지 않고,
+요구사항에 정의된 논리 레코드와 순서의 동일성을 검증합니다.
 
 표제어, 뜻풀이, 예문, 번역 같은 사전 지식은 CSS 클래스와 화면 제목을 만드는
 보조 계층에서만 사용합니다. 사전별 매핑이 누락돼도 원본 데이터가 사라져서는
@@ -73,18 +95,18 @@ Rust 구현의 중심 모델은 사전별 도메인 객체가 아니라 일반 X
 
 | 모듈 | 책임 |
 | --- | --- |
-| `cli` | `preflight` 명령, 옵션, 안전 기본값과 help |
-| `app` | 입력 구조, 출력 경계, 오류 코드와 종료 정책 |
+| `cli` | `preflight`·`inspect` 명령, 옵션과 안전 기본값 |
+| `app` | 입력·출력 경계, 단권 검사, 오류 코드와 종료 정책 |
 | `main` | 표준 출력·오류와 프로세스 종료 코드 연결 |
+| `catalog` | Git 추적 XML, 사전·권 번호와 출력 파일명 |
+| `source` | 제어 바이트 치환과 스트리밍 XML 이벤트 |
+| `record` | 손실 없는 `SourceRecord`와 canonical digest v1 |
 
 다음 이름은 이후 구현 방향이며 현재 파일이 존재한다는 뜻이 아닙니다.
 
 | 모듈 | 책임 |
 | --- | --- |
 | `cli` | 명령, 옵션, 종료 코드와 진행 출력 |
-| `catalog` | 사전 종류, XML 목록, 권 번호와 파일명 |
-| `source` | 입력 바이트 정규화와 스트리밍 XML 이벤트 |
-| `record` | 손실 없는 공통 레코드와 canonical digest |
 | `render` | 의미 강조와 XHTML 직렬화 |
 | `epub` | OPF, nav, CSS, ZIP 패키징 |
 | `audit` | 원본-EPUB 독립 대조 |

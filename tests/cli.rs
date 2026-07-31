@@ -35,6 +35,37 @@ impl TempFixture {
         }
         source
     }
+
+    fn tracked_krdict_source(&self, xml: &str) -> PathBuf {
+        let source = self.root.join("tracked-source");
+        fs::create_dir_all(source.join("krdict"))
+            .expect("tracked source directory should be created");
+        fs::write(source.join("krdict").join("001.xml"), xml)
+            .expect("tracked XML should be written");
+        fs::write(
+            source.join("krdict").join("999.xml"),
+            "<LexicalResource><LexicalEntry/></LexicalResource>",
+        )
+        .expect("untracked XML should be written");
+
+        let init = Command::new("git")
+            .arg("init")
+            .arg("--quiet")
+            .arg(&source)
+            .status()
+            .expect("Git should initialize the fixture");
+        assert!(init.success());
+        let add = Command::new("git")
+            .arg("-C")
+            .arg(&source)
+            .arg("add")
+            .arg("--")
+            .arg("krdict/001.xml")
+            .status()
+            .expect("Git should track the fixture");
+        assert!(add.success());
+        source
+    }
 }
 
 impl Drop for TempFixture {
@@ -56,6 +87,7 @@ fn help_exits_successfully() {
 
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("preflight"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("inspect"));
 }
 
 #[test]
@@ -116,4 +148,71 @@ fn fixture_preflight_reports_policy_without_writing_output() {
     assert!(stdout.contains("overwrite=false"));
     assert!(stdout.contains("keep_going=false"));
     assert!(!output_path.exists());
+}
+
+#[test]
+fn inspect_reads_one_tracked_volume_without_writing_files() {
+    let fixture = TempFixture::new();
+    let source = fixture.tracked_krdict_source(
+        "<LexicalResource><Lexicon><LexicalEntry id=\"one\"><future/></LexicalEntry>\
+         </Lexicon></LexicalResource>",
+    );
+    let output = run(&[
+        "inspect",
+        "--source",
+        &source.to_string_lossy(),
+        "--dictionary",
+        "krdict",
+        "--volume",
+        "1",
+    ]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("status=inspected"));
+    assert!(stdout.contains("dictionary=krdict"));
+    assert!(stdout.contains("volumes=1"));
+    assert!(stdout.contains("source=krdict\\001.xml") || stdout.contains("source=krdict/001.xml"));
+    assert!(stdout.contains("entries=1"));
+    assert!(stdout.contains("record_schema=kdep-source-record-v1"));
+    assert!(stdout.contains("record_sha256="));
+    assert!(!fixture.path().join("outputs").exists());
+}
+
+#[test]
+fn inspect_excludes_untracked_xml_from_volume_numbers() {
+    let fixture = TempFixture::new();
+    let source = fixture.tracked_krdict_source(
+        "<LexicalResource><Lexicon><LexicalEntry/></Lexicon></LexicalResource>",
+    );
+    let output = run(&[
+        "inspect",
+        "--source",
+        &source.to_string_lossy(),
+        "--dictionary",
+        "krdict",
+        "--volume",
+        "2",
+    ]);
+
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error[KDEP-E006]"));
+    assert!(stderr.contains("available range is 1..=1"));
+}
+
+#[test]
+fn inspect_reports_malformed_xml_with_structured_error() {
+    let fixture = TempFixture::new();
+    let source = fixture.tracked_krdict_source("<LexicalResource><LexicalEntry></LexicalResource>");
+    let output = run(&[
+        "inspect",
+        "--source",
+        &source.to_string_lossy(),
+        "--dictionary",
+        "krdict",
+    ]);
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("error[KDEP-E007]"));
 }

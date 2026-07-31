@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LexicalResource xmlns:future="urn:kdep:fixture">
+  <Lexicon language="ko" source="synthetic">
+    <LexicalEntry id="k-001">
+      <Lemma>
+        <feat att="writtenForm" val="ᄔᅡ라"/>
+      </Lemma>
+      <future:opaque zeta="첫째" alpha="둘째">미지 필드</future:opaque>
+    </LexicalEntry>
+  </Lexicon>
+</LexicalResource>
