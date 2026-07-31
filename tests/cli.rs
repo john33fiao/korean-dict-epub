@@ -88,6 +88,7 @@ fn help_exits_successfully() {
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("preflight"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("inspect"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("build"));
 }
 
 #[test]
@@ -215,4 +216,42 @@ fn inspect_reports_malformed_xml_with_structured_error() {
 
     assert_eq!(output.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&output.stderr).contains("error[KDEP-E007]"));
+}
+
+#[test]
+fn build_writes_one_epub_and_requires_explicit_overwrite() {
+    let fixture = TempFixture::new();
+    let source = fixture.tracked_krdict_source(
+        "<LexicalResource><Lexicon><LexicalEntry><Lemma>\
+         <feat att=\"writtenForm\" val=\"가상어\"/></Lemma></LexicalEntry>\
+         </Lexicon></LexicalResource>",
+    );
+    let output_path = fixture.path().join("epubs");
+    let source_argument = source.to_string_lossy().into_owned();
+    let output_argument = output_path.to_string_lossy().into_owned();
+    let arguments = [
+        "build",
+        "--source",
+        source_argument.as_str(),
+        "--output",
+        output_argument.as_str(),
+        "--dictionary",
+        "krdict",
+    ];
+
+    let built = run(&arguments);
+
+    assert!(built.status.success());
+    assert!(String::from_utf8_lossy(&built.stdout).contains("status=built"));
+    let epub = output_path.join("01-한국어기초사전-001-of-001.epub");
+    assert!(epub.is_file());
+
+    let refused = run(&arguments);
+    assert_eq!(refused.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("error[KDEP-E008]"));
+
+    let mut overwrite_arguments = arguments.to_vec();
+    overwrite_arguments.push("--overwrite");
+    let overwritten = run(&overwrite_arguments);
+    assert!(overwritten.status.success());
 }

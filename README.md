@@ -14,8 +14,10 @@
   원본 대조·내부 무결성·EPUBCheck 검사를 124/124권 통과했습니다.
 - Rust 주 구현은 손실 없는 XML 레코드 계층까지 진행됐습니다. `preflight`로
   입력·출력 경로와 정책을 점검하고 `inspect`로 추적 XML 한 권의 항목 수와
-  canonical digest를 읽기 전용으로 확인할 수 있습니다.
-- Rust의 XHTML 렌더링과 EPUB 생성은 아직 구현 전입니다.
+  canonical digest를 읽기 전용으로 확인할 수 있습니다. `build`는 선택한
+  사전 한 권을 EPUB 3로 생성합니다.
+- Rust 단권 EPUB 생성은 자동 검증과 대표 krdict 1권 EPUBCheck를 통과했지만,
+  전체 124권 실행과 독립 감사는 아직 진행 전입니다.
 - 실제 전자책 앱·기기에서의 글꼴과 줄바꿈 확인은 남아 있습니다.
 - 생성된 EPUB, 검사 보고서, 캐시와 원본 데이터 자체는 부모 저장소의 커밋
   대상이 아닙니다.
@@ -95,7 +97,17 @@ cargo run -- inspect --dictionary krdict --volume 1
 ```
 
 `--dictionary`는 `krdict`, `stdict`, `opendict` 중 하나이며 권 번호는 각
-사전에서 파일명 순으로 계산합니다. 실제 EPUB 변환 명령은 이후 구현합니다.
+사전에서 파일명 순으로 계산합니다.
+
+선택한 한 권을 기본 `outputs/rust` 디렉터리에 EPUB으로 생성합니다.
+
+```powershell
+cargo run --release -- build --dictionary krdict --volume 1
+```
+
+기존 파일은 기본적으로 덮어쓰지 않습니다. 의도적으로 교체할 때만
+`--overwrite`를 사용합니다. 전체 124권 일괄 실행과 독립 감사 명령은 이후
+티켓에서 추가합니다.
 
 ## 데이터와 저작권
 

@@ -4,10 +4,9 @@
 
 - `prototype/python/`에는 전체 124권 생성과 검증에 사용한 Python 기준선이
   있습니다.
-- Rust 주 구현은 KDEP-002의 catalog와 손실 없는 레코드 계층까지 자동
-  검증됐습니다. `preflight`는 경로와 실행 정책만 점검하고, `inspect`는
-  추적 XML 한 권을 읽어 항목 수와 digest를 출력합니다. EPUB은 만들지
-  않습니다.
+- Rust 주 구현은 KDEP-003 단권 EPUB 작성까지 자동 검증됐습니다.
+  `preflight`는 경로와 실행 정책만 점검하고, `inspect`는 추적 XML 한 권의
+  항목 수와 digest를 출력하며, `build`는 선택한 한 권을 EPUB 3로 생성합니다.
 - `references/korean-dict-nikl`은 읽기 전용 입력으로 취급할 Git 서브모듈입니다.
 - 생성 EPUB과 보고서는 로컬 산출물이며 Git 추적 대상이 아닙니다.
 
@@ -80,6 +79,22 @@ canonical digest v1은 다음 순서로 SHA-256에 입력합니다.
 - 권 제목, 시리즈, 권 번호와 식별자는 원본과 설정에서 결정적으로 계산합니다.
 - 임시 파일에 완성한 뒤 최종 경로로 교체하여 부분 EPUB을 남기지 않습니다.
 
+현재 renderer는 source record마다 독립된 XHTML block과
+`data-kdep-kind`, `data-kdep-depth`를 기록합니다. 시작·빈·종료 요소,
+element/tail 텍스트와 원래 순서의 속성은 모두 눈에 보이며, XML 금지
+제어문자는 `data-codepoint` span으로 직렬화합니다. 알려진 표제어·뜻풀이·예문·
+번역은 CSS class만 더합니다.
+
+builder는 항목 하나만 메모리에 모아 표제어와 article을 만든 뒤 staging
+XHTML에 기록합니다. 완결된 항목 수 300개 또는 직렬화 약 1MiB 중 먼저
+도달한 지점에서 장을 닫으며 한 항목 내부는 나누지 않습니다. title, nav,
+OPF, CSS와 chapter 목록을 확정한 다음 코드가 만든 고정 ZIP 경로만
+패키징합니다.
+
+ZIP timestamp와 OPF `dcterms:modified`는 1980-01-01로 고정합니다. UUID v5
+식별자는 사전 key와 상대 XML 경로에서 계산합니다. 출력은 같은 디렉터리의
+atomic temporary file에 완성·내부 점검한 뒤에만 최종 경로로 commit합니다.
+
 ### 검증 독립성
 
 변환기의 자체 manifest만으로 원본 보존을 주장하지 않습니다.
@@ -101,14 +116,14 @@ canonical digest v1은 다음 순서로 SHA-256에 입력합니다.
 | `catalog` | Git 추적 XML, 사전·권 번호와 출력 파일명 |
 | `source` | 제어 바이트 치환과 스트리밍 XML 이벤트 |
 | `record` | 손실 없는 `SourceRecord`와 canonical digest v1 |
+| `render` | generic record XHTML, 가시적 제어문자와 의미 CSS class |
+| `epub` | 단권 장 분할, OPF·nav·CSS와 결정적 ZIP 패키징 |
 
 다음 이름은 이후 구현 방향이며 현재 파일이 존재한다는 뜻이 아닙니다.
 
 | 모듈 | 책임 |
 | --- | --- |
 | `cli` | 명령, 옵션, 종료 코드와 진행 출력 |
-| `render` | 의미 강조와 XHTML 직렬화 |
-| `epub` | OPF, nav, CSS, ZIP 패키징 |
 | `audit` | 원본-EPUB 독립 대조 |
 | `report` | 빌드·검증 JSON 보고서 |
 
